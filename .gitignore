@@ -18,3 +18,7 @@ test-*.tmp.js
 # --- Sistema ---
 .DS_Store
 Thumbs.db
+
+# --- Scripts locales de Windows (deploy remoto; cada dev usa el suyo) ---
+deploy-taberna.bat
+*.local.bat

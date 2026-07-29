@@ -1,4 +1,5 @@
 import http from "node:http";
+import { randomBytes } from "node:crypto";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { getConfig, addInspirations } from "./db.js";
@@ -126,22 +127,34 @@ async function obtenerCredenciales() {
 // ---------- Flujo OAuth (compartido por /sincronizar twitch y npm run twitch-auth) ----------
 
 /**
- * Levanta un servidor local temporal para recibir el callback de OAuth de Twitch.
- * Devuelve { authUrl, redirectUri, promesa } — `promesa` resuelve con los tokens
- * cuando el canal autoriza, o rechaza si hay error/timeout.
+ * Levanta un servidor HTTP temporal para recibir el callback de OAuth de Twitch.
+ *
+ * - Si TWITCH_CALLBACK_URL está definida (p. ej. https://owltwitch.cobaltcatstudios.com/callback
+ *   vía túnel de Cloudflare), esa es la URL pública que hay que registrar en Twitch y el
+ *   servidor local solo espera la petición que el túnel reenvía al puerto local.
+ * - Si no, se usa http://localhost:<puerto>/callback (solo sirve si el navegador
+ *   está en la misma máquina que el bot).
+ *
+ * Devuelve { authUrl, redirectUri, state, promesa } — `promesa` resuelve con los
+ * tokens cuando el canal autoriza, o rechaza si hay error/timeout.
  */
-export function iniciarFlujoOAuth({ port = Number(process.env.TWITCH_AUTH_PORT || 3456), timeoutMs = 5 * 60_000 } = {}) {
+export function iniciarFlujoOAuth({ port = Number(process.env.TWITCH_AUTH_PORT || 3050), timeoutMs = 5 * 60_000 } = {}) {
   if (!TWITCH_CLIENT_ID || !TWITCH_CLIENT_SECRET) {
     throw new Error("Faltan TWITCH_CLIENT_ID y/o TWITCH_CLIENT_SECRET en .env");
   }
 
-  const redirectUri = `http://localhost:${port}/callback`;
+  const redirectUri = process.env.TWITCH_CALLBACK_URL || `http://localhost:${port}/callback`;
+  const callbackPath = new URL(redirectUri).pathname;
+  // state: protección CSRF estándar de OAuth — se verifica en el callback
+  const state = randomBytes(16).toString("hex");
+
   const authUrl = new URL("https://id.twitch.tv/oauth2/authorize");
   authUrl.search = new URLSearchParams({
     client_id: TWITCH_CLIENT_ID,
     redirect_uri: redirectUri,
     response_type: "code",
     scope: SCOPE_NECESARIO,
+    state,
     force_verify: "false",
   });
 
@@ -154,8 +167,8 @@ export function iniciarFlujoOAuth({ port = Number(process.env.TWITCH_AUTH_PORT |
 
   const promesa = new Promise((resolve, reject) => {
     server = http.createServer(async (req, res) => {
-      const url = new URL(req.url, redirectUri);
-      if (url.pathname !== "/callback") {
+      const url = new URL(req.url ?? "/", "http://localhost");
+      if (url.pathname !== callbackPath) {
         res.writeHead(404);
         res.end("Nada por aquí. Vuelve a Discord.");
         return;
@@ -168,6 +181,14 @@ export function iniciarFlujoOAuth({ port = Number(process.env.TWITCH_AUTH_PORT |
         res.end(`Error de autorización: ${errorDesc ?? "sin código"}`);
         cleanup();
         reject(new Error(errorDesc ?? "Twitch no devolvió el código de autorización."));
+        return;
+      }
+
+      if (url.searchParams.get("state") !== state) {
+        res.writeHead(400);
+        res.end("Estado OAuth inválido. Vuelve a Discord y reintenta el comando.");
+        cleanup();
+        reject(new Error("El parámetro 'state' no coincide (posible petición ajena al flujo)."));
         return;
       }
 
@@ -203,7 +224,7 @@ export function iniciarFlujoOAuth({ port = Number(process.env.TWITCH_AUTH_PORT |
 
     server.on("error", (error) => {
       clearTimeout(timer);
-      reject(new Error(`No se pudo abrir el puerto ${port}: ${error.message}`));
+      reject(new Error(`No se pudo abrir el puerto ${port}: ${error.message} (¿lo está usando otra cosa?)`));
     });
 
     timer = setTimeout(() => {
@@ -218,7 +239,7 @@ export function iniciarFlujoOAuth({ port = Number(process.env.TWITCH_AUTH_PORT |
   // consumidor (comando o CLI) adjunte su await. El rechazo sigue propagándose.
   promesa.catch(() => {});
 
-  return { authUrl: authUrl.href, redirectUri, promesa };
+  return { authUrl: authUrl.href, redirectUri, state, promesa };
 }
 
 // ---------- EventSub WebSocket ----------

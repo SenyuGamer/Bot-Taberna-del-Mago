@@ -61,6 +61,11 @@ fi
 
 # ---------- 2. Código en /opt/taberna-mago ----------
 
+# Git >= 2.35 bloquea repos cuyo dueño es otro usuario (los futuros deploys
+# corren como root y el código quedará con dueño orangepi). Excepción idempotente:
+git config --global --get-all safe.directory 2>/dev/null | grep -qx "$APP_DIR" \
+  || git config --global --add safe.directory "$APP_DIR"
+
 mkdir -p "$APP_DIR"
 
 if [ "$SRC_DIR" = "$APP_DIR" ]; then

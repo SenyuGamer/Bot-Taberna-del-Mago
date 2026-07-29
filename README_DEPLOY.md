@@ -48,16 +48,20 @@ sudo bash scripts/install.sh
 
 > **No copies tu `.env` dentro del git** — va solo en `/opt/taberna-mago/.env`, fuera del repositorio (está en `.gitignore`).
 
-### Sincronizar Twitch en un servidor headless (opcional)
+### Sincronizar Twitch con tu túnel de Cloudflare (opcional)
 
-El comando `/sincronizar twitch` levanta un servidor temporal en `localhost:3456` **de la Pi**. Para que el callback llegue desde tu PC, abre un túnel SSH **antes** de autorizar en el navegador:
+El bot no necesita puertos abiertos: tu túnel de Cloudflare ya expone el callback. Configura en `/opt/taberna-mago/.env`:
 
 ```bash
-# En tu PC (déjalo abierto mientras autorizas):
-ssh -L 3456:localhost:3456 orangepi@<ip-de-la-pi>
+TWITCH_CALLBACK_URL=https://owltwitch.cobaltcatstudios.com/callback
+TWITCH_AUTH_PORT=3050   # el puerto local al que apunta tu túnel
 ```
 
-Y luego, en Discord: `/sincronizar twitch` → abre el enlace → listo. Los tokens quedan en `/opt/taberna-mago/data/twitch-token.json` y **se renuevan solos** cada ~3.5 h.
+1. En https://dev.twitch.tv/console/apps → tu app → registra la URL pública como *OAuth Redirect URL* (una sola vez).
+2. El DM (o un admin) ejecuta `/sincronizar twitch` en Discord, abre el enlace y autoriza con la cuenta del canal.
+3. Twitch redirige a tu dominio → Cloudflare lo reenvía a `localhost:3050` del servidor → listo, el bot confirma al instante.
+
+Los tokens quedan en `/opt/taberna-mago/data/twitch-token.json` y **se renuevan solos** cada ~3.5 h. Sin túnel (misma máquina), deja `TWITCH_CALLBACK_URL` vacía y se usará `http://localhost:3050/callback`.
 
 ---
 
@@ -147,3 +151,58 @@ Logs sanos al arrancar:
 | `taberna-mago.service` | Unidad systemd (usuario `orangepi`, endurecida, solo `data/` escribible) |
 | `.gitignore` | Mantiene secretos y datos fuera del repo |
 | `README_DEPLOY.md` | Este documento |
+
+---
+
+## 7. Deploy desde Windows
+
+`deploy-taberna.bat` ejecuta `scripts/deploy.sh` **en la Pi por SSH** desde tu PC, sin abrir nada más. Es un script *local* (está en `.gitignore`: cada PC puede tener el suyo con otra IP).
+
+### Preparación (una sola vez)
+
+**1. Verifica que tienes OpenSSH** (viene con Windows 11):
+
+```powershell
+ssh -V
+```
+
+Si dice que no existe: *Configuración → Aplicaciones → Características opcionales → Agregar una característica → OpenSSH Client*, o en PowerShell de administrador:
+
+```powershell
+Add-WindowsCapability -Online -Name OpenSSH.Client~~~~0.0.1.0
+```
+
+**2. Guarda el script en una carpeta propia:**
+
+```powershell
+mkdir "$env:USERPROFILE\Scripts"
+copy deploy-taberna.bat "$env:USERPROFILE\Scripts\"
+```
+
+**3. Añade esa carpeta al PATH** (para ejecutarlo desde cualquier sitio):
+
+```powershell
+$p = [Environment]::GetEnvironmentVariable("Path", "User")
+[Environment]::SetEnvironmentVariable("Path", "$p;$env:USERPROFILE\Scripts", "User")
+```
+
+*(También puedes hacerlo por interfaz: busca "Editar las variables de entorno" → Variables de entorno → `Path` de usuario → Editar → Nuevo → `%USERPROFILE%\Scripts`.)*
+**Cierra y abre la terminal** para que coja el nuevo PATH.
+
+### Uso diario
+
+Desde PowerShell o CMD, en **cualquier carpeta**:
+
+```
+deploy-taberna
+```
+
+Salida esperada: `Deploying Taberna del Mago...` → te pedirá la contraseña de `sudo` de la Pi → logs del deploy → `Deploy completed.` Si algo falla: `Deploy failed.` y la ventana se queda abierta con los últimos logs de la Pi.
+
+### Notas
+
+- La **primera vez** SSH te pedirá aceptar la huella del host (`yes`) y luego la contraseña (o tu clave, si tienes `ssh-copy-id` ya hecho a la Pi).
+- Devuelve `ERRORLEVEL` 0/1, útil si lo encadenas con otros scripts.
+- Si el deploy remoto muestra `dubious ownership in repository`, ejecuta **una vez** en la Pi:
+  `sudo git config --global --add safe.directory /opt/taberna-mago`
+  (los `install.sh`/`deploy.sh` actuales ya lo hacen automáticamente).

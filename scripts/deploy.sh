@@ -61,6 +61,11 @@ if [ ! -d .git ]; then
   exit 1
 fi
 
+# Git >= 2.35 bloquea repos cuyo dueño es otro usuario (el deploy corre como
+# root y el código quedó con dueño orangepi). Excepción segura e idempotente:
+git config --global --get-all safe.directory 2>/dev/null | grep -qx "$APP_DIR" \
+  || git config --global --add safe.directory "$APP_DIR"
+
 COMMIT_ANTES="$(git rev-parse HEAD)"
 
 if git symbolic-ref -q HEAD >/dev/null; then

@@ -1,6 +1,6 @@
 import { SlashCommandBuilder, MessageFlags } from "discord.js";
 import { iniciarFlujoOAuth, guardarTokens, iniciarTwitch } from "../twitch.js";
-import { TEMA, embed, embedError, esAdmin, enviarRegistro } from "../utils.js";
+import { TEMA, embed, embedError, esDMoAdmin, enviarRegistro } from "../utils.js";
 
 const COLOR = TEMA.color.twitch;
 let sincronizando = false;
@@ -12,13 +12,13 @@ export const sincronizar = {
     .addSubcommand((sub) =>
       sub
         .setName("twitch")
-        .setDescription("Vincula el canal de Twitch para detectar canjes de inspiración (solo admins)")
+        .setDescription("Vincula el canal de Twitch para detectar canjes de inspiración (DM/admins)")
     ),
 
   async execute(interaction) {
-    if (!esAdmin(interaction)) {
+    if (!esDMoAdmin(interaction)) {
       return interaction.reply({
-        embeds: [embedError("Solo un administrador puede sincronizar Twitch.")],
+        embeds: [embedError("Solo el DM o un administrador puede sincronizar Twitch.")],
         flags: MessageFlags.Ephemeral,
       });
     }
@@ -45,10 +45,9 @@ export const sincronizar = {
         embeds: [
           embed(
             COLOR,
-            `**Pasos para vincular el canal** 🦉\n\n` +
-            `1️⃣ *(Solo la primera vez)* En https://dev.twitch.tv/console/apps → tu aplicación, añade esta **URL de redirección OAuth**:\n\`${flujo.redirectUri}\`\n\n` +
-            `2️⃣ Abre este enlace e **inicia sesión con la cuenta DEL CANAL**:\n[🔗 Autorizar en Twitch](${flujo.authUrl})\n\n` +
-            `3️⃣ Tienes **5 minutos**. Cuando termines, confirmaré por aquí.\n\n*Este mensaje solo lo ves tú.*`,
+            `**1.** Abre el enlace e inicia sesión con la **cuenta del canal**:\n[🔗 Autorizar en Twitch](${flujo.authUrl})\n\n` +
+            `**2.** Acepta los permisos y vuelve aquí: en cuanto termines confirmo por este mismo mensaje. *(Tienes 5 minutos; solo tú ves este mensaje.)*\n\n` +
+            `⚙️ *Solo la primera vez: en https://dev.twitch.tv/console/apps → tu aplicación, registra esta URL de redirección:*\n\`${flujo.redirectUri}\``,
             "🦉 Sincronizar Twitch"
           ),
         ],
