@@ -16,6 +16,19 @@ export const sincronizar = {
     ),
 
   async execute(interaction) {
+    // ⏸️ TWITCH DESACTIVADO TEMPORALMENTE (revisar OAuth/redirect_uri más adelante).
+    //    El comando sigue registrado en Discord, pero responde esto y no hace nada.
+    //    Para reactivarlo: borra este bloque y reinicia el servicio (no hay que re-registrar).
+    return interaction.reply({
+      embeds: [
+        embed(
+          COLOR,
+          "🦉 La sincronización con Twitch está **desactivada temporalmente**.\nEl tabernero está afinando los detalles del portal mágico (OAuth); volverá pronto. 🍺"
+        ),
+      ],
+      flags: MessageFlags.Ephemeral,
+    });
+
     if (!esDMoAdmin(interaction)) {
       return interaction.reply({
         embeds: [embedError("Solo el DM o un administrador puede sincronizar Twitch.")],
