@@ -1,0 +1,93 @@
+import { SlashCommandBuilder, MessageFlags } from "discord.js";
+import { iniciarFlujoOAuth, guardarTokens, iniciarTwitch } from "../twitch.js";
+import { TEMA, embed, embedError, esAdmin, enviarRegistro } from "../utils.js";
+
+const COLOR = TEMA.color.twitch;
+let sincronizando = false;
+
+export const sincronizar = {
+  data: new SlashCommandBuilder()
+    .setName("sincronizar")
+    .setDescription("Sincroniza las integraciones externas de la taberna")
+    .addSubcommand((sub) =>
+      sub
+        .setName("twitch")
+        .setDescription("Vincula el canal de Twitch para detectar canjes de inspiración (solo admins)")
+    ),
+
+  async execute(interaction) {
+    if (!esAdmin(interaction)) {
+      return interaction.reply({
+        embeds: [embedError("Solo un administrador puede sincronizar Twitch.")],
+        flags: MessageFlags.Ephemeral,
+      });
+    }
+
+    if (sincronizando) {
+      return interaction.reply({
+        embeds: [embedError("Ya hay una sincronización de Twitch en curso. Termínala o espera a que caduque.")],
+        flags: MessageFlags.Ephemeral,
+      });
+    }
+
+    if (!process.env.TWITCH_CLIENT_ID || !process.env.TWITCH_CLIENT_SECRET) {
+      return interaction.reply({
+        embeds: [embedError("Faltan `TWITCH_CLIENT_ID` y/o `TWITCH_CLIENT_SECRET` en el archivo `.env` del bot.\nCrea una app en https://dev.twitch.tv/console/apps (o reutiliza la de OwlTwitch) y vuelve a intentarlo.")],
+        flags: MessageFlags.Ephemeral,
+      });
+    }
+
+    sincronizando = true;
+    try {
+      const flujo = iniciarFlujoOAuth();
+
+      await interaction.reply({
+        embeds: [
+          embed(
+            COLOR,
+            `**Pasos para vincular el canal** 🦉\n\n` +
+            `1️⃣ *(Solo la primera vez)* En https://dev.twitch.tv/console/apps → tu aplicación, añade esta **URL de redirección OAuth**:\n\`${flujo.redirectUri}\`\n\n` +
+            `2️⃣ Abre este enlace e **inicia sesión con la cuenta DEL CANAL**:\n[🔗 Autorizar en Twitch](${flujo.authUrl})\n\n` +
+            `3️⃣ Tienes **5 minutos**. Cuando termines, confirmaré por aquí.\n\n*Este mensaje solo lo ves tú.*`,
+            "🦉 Sincronizar Twitch"
+          ),
+        ],
+        flags: MessageFlags.Ephemeral,
+      });
+
+      const tokens = await flujo.promesa;
+      guardarTokens(tokens);
+      const credenciales = await iniciarTwitch(interaction.client);
+
+      if (credenciales) {
+        await interaction.followUp({
+          embeds: [
+            embed(
+              COLOR,
+              `✅ Twitch sincronizado con el canal **@${credenciales.login}**.\nLos canjes que coincidan con \`${process.env.TWITCH_REWARD_REGEX || "inspiraci"}\` sumarán **+1** ${TEMA.emoji.inspiracion} al DM y se anunciarán en el canal de registros.`
+            ),
+          ],
+          flags: MessageFlags.Ephemeral,
+        });
+        await enviarRegistro(
+          interaction.guild,
+          embed(COLOR, `**${interaction.user.displayName}** sincronizó la taberna con el canal de Twitch **@${credenciales.login}**. 🦉`, "🦉 Registro de Twitch")
+        );
+      } else {
+        await interaction.followUp({
+          embeds: [embedError("Los tokens se guardaron pero no se pudieron validar con Twitch. Revisa la consola del bot.")],
+          flags: MessageFlags.Ephemeral,
+        });
+      }
+    } catch (error) {
+      const mensaje = `❌ No se pudo sincronizar Twitch: **${error.message}**`;
+      if (interaction.replied) {
+        await interaction.followUp({ embeds: [embedError(mensaje)], flags: MessageFlags.Ephemeral }).catch(() => {});
+      } else {
+        await interaction.reply({ embeds: [embedError(mensaje)], flags: MessageFlags.Ephemeral }).catch(() => {});
+      }
+    } finally {
+      sincronizando = false;
+    }
+  },
+};

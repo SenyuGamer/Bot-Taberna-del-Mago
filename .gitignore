@@ -1,0 +1,20 @@
+# --- Dependencias ---
+node_modules/
+
+# --- Secretos (nunca commitear) ---
+.env
+.env.local
+!.env.example
+
+# --- Datos en ejecución (persisten en el servidor, no en git) ---
+data/
+*.sqlite
+
+# --- Logs y temporales ---
+*.log
+nohup.out
+test-*.tmp.js
+
+# --- Sistema ---
+.DS_Store
+Thumbs.db

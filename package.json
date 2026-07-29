@@ -1,0 +1,17 @@
+{
+  "name": "la-taberna-del-mago-bot",
+  "version": "1.0.0",
+  "description": "Bot de Discord para el servidor de rol de D&D La Taberna del Mago",
+  "type": "module",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "start": "node --env-file=.env --disable-warning=ExperimentalWarning src/index.js",
+    "deploy": "node --env-file=.env --disable-warning=ExperimentalWarning deploy.js",
+    "twitch-auth": "node --env-file=.env twitch-auth.js"
+  },
+  "dependencies": {
+    "discord.js": "^14.18.0"
+  }
+}

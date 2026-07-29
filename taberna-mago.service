@@ -1,0 +1,40 @@
+[Unit]
+Description=Bot de Discord "La Taberna del Mago"
+Documentation=https://github.com/
+# Espera a que haya red realmente disponible
+Wants=network-online.target
+After=network-online.target
+
+# No intentar arrancar sin configuración
+ConditionPathExists=/opt/taberna-mago/.env
+
+[Service]
+Type=simple
+User=orangepi
+Group=orangepi
+
+# CRÍTICO: el .env, la SQLite (data/) y los tokens de Twitch usan rutas relativas
+WorkingDirectory=/opt/taberna-mago
+
+# /usr/bin/env resuelve node desde el PATH por defecto de systemd
+# (funciona tanto con NodeSource /usr/bin/node como con tarball /usr/local/bin/node)
+ExecStart=/usr/bin/env node --env-file=.env --disable-warning=ExperimentalWarning src/index.js
+
+Environment=NODE_ENV=production
+
+# Reinicio automático si el proceso muere (el bot no usa puertos entrantes)
+Restart=always
+RestartSec=5
+TimeoutStopSec=15
+SyslogIdentifier=taberna-mago
+
+# --- Endurecimiento razonable ---
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+# Única ruta escribible: la base de datos SQLite y los tokens rotados de Twitch
+ReadWritePaths=/opt/taberna-mago/data
+
+[Install]
+WantedBy=multi-user.target

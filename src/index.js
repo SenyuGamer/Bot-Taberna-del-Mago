@@ -1,0 +1,61 @@
+import { Client, GatewayIntentBits, MessageFlags } from "discord.js";
+import { estrellitas, estrellitasNegras } from "./commands/estrellitas.js";
+import { inspiracion } from "./commands/inspiracion.js";
+import { dm } from "./commands/dm.js";
+import { registros } from "./commands/registros.js";
+import { sincronizar } from "./commands/sincronizar.js";
+import { embedError } from "./utils.js";
+import { iniciarTwitch } from "./twitch.js";
+
+const token = process.env.DISCORD_TOKEN;
+if (!token || token === "pega_aqui_tu_token") {
+  console.error("❌ Falta DISCORD_TOKEN en el archivo .env (pega el token real de tu bot).");
+  process.exit(1);
+}
+
+export const comandos = new Map(
+  [estrellitas, estrellitasNegras, inspiracion, dm, registros, sincronizar].map((c) => [c.data.name, c])
+);
+
+const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+
+client.once("clientReady", () => {
+  console.log(`🍺 La Taberna del Mago abre sus puertas: ${client.user.tag} en línea.`);
+  console.log(`📖 Comandos disponibles: ${[...comandos.keys()].map((n) => `/${n}`).join(", ")}`);
+  iniciarTwitch(client);
+});
+
+client.on("interactionCreate", async (interaction) => {
+  if (!interaction.isChatInputCommand()) return;
+  if (!interaction.inGuild()) {
+    return interaction.reply({
+      embeds: [embedError("Los comandos de la taberna solo funcionan dentro de un servidor.")],
+      flags: MessageFlags.Ephemeral,
+    });
+  }
+
+  const comando = comandos.get(interaction.commandName);
+  if (!comando) return;
+
+  try {
+    await comando.execute(interaction);
+  } catch (error) {
+    console.error(`Error ejecutando /${interaction.commandName}:`, error);
+    const respuesta = {
+      embeds: [embedError("El tabernero tropezó con un barril. Algo salió mal, inténtalo de nuevo.")],
+      flags: MessageFlags.Ephemeral,
+    };
+    if (interaction.replied || interaction.deferred) {
+      await interaction.followUp(respuesta).catch(() => {});
+    } else {
+      await interaction.reply(respuesta).catch(() => {});
+    }
+  }
+});
+
+try {
+  await client.login(token);
+} catch (error) {
+  console.error("❌ No se pudo iniciar sesión. Revisa que DISCORD_TOKEN sea válido.", error.message);
+  process.exit(1);
+}
