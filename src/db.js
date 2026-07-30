@@ -120,3 +120,32 @@ export function setLogChannel(guildId, channelId) {
   ensureConfigStmt.run(guildId);
   setLogChannelStmt.run(channelId, guildId);
 }
+
+// ---------- Sesiones de música (Djinni → voz) ----------
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS djinni_sessions (
+    guild_id   TEXT PRIMARY KEY,
+    channel_id TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )
+`);
+
+const getCanalDjinniStmt = db.prepare(
+  "SELECT channel_id FROM djinni_sessions WHERE guild_id = ?"
+);
+const setCanalDjinniStmt = db.prepare(`
+  INSERT INTO djinni_sessions (guild_id, channel_id, updated_at)
+  VALUES (?, ?, ?)
+  ON CONFLICT (guild_id) DO UPDATE SET channel_id = excluded.channel_id, updated_at = excluded.updated_at
+`);
+
+/** Canal de voz usado por última vez con música (para re-sincronizar rápido). */
+export function getCanalDjinni(guildId) {
+  const row = getCanalDjinniStmt.get(guildId);
+  return row ? row.channel_id : null;
+}
+
+export function setCanalDjinni(guildId, channelId) {
+  setCanalDjinniStmt.run(guildId, channelId, new Date().toISOString());
+}

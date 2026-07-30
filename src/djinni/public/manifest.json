@@ -1,0 +1,15 @@
+{
+  "name": "DJinni Music Player",
+  "version": "1.0.2",
+  "manifest_version": 1,
+  "author": "Keegan",
+  "icon": "/logo.png",
+  "description": "Mix sound effects and music with looping, fading, and more to provide an immersive experience!",
+  "action": {
+    "title": "DJinni Music Player",
+    "icon": "/icon.svg",
+    "popover": "/",
+    "height": 400,
+    "width": 580
+  }
+}

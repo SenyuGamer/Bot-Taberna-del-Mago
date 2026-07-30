@@ -5,8 +5,12 @@ import { dm } from "./commands/dm.js";
 import { registros } from "./commands/registros.js";
 import { sincronizar } from "./commands/sincronizar.js";
 import { hora } from "./commands/hora.js";
+import { syncmusic } from "./commands/syncmusic.js";
+import { musica } from "./commands/musica.js";
 import { embedError } from "./utils.js";
 import { iniciarTwitch } from "./twitch.js";
+import { iniciarPuenteDjinni } from "./djinniBridge.js";
+import { programarSalidaSiVacio } from "./voice/sessionManager.js";
 
 const token = process.env.DISCORD_TOKEN;
 if (!token || token === "pega_aqui_tu_token") {
@@ -15,15 +19,23 @@ if (!token || token === "pega_aqui_tu_token") {
 }
 
 export const comandos = new Map(
-  [estrellitas, estrellitasNegras, inspiracion, dm, registros, sincronizar, hora].map((c) => [c.data.name, c])
+  [estrellitas, estrellitasNegras, inspiracion, dm, registros, sincronizar, hora, syncmusic, musica].map((c) => [c.data.name, c])
 );
 
-const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates] });
 
 client.once("clientReady", () => {
   console.log(`🍺 La Taberna del Mago abre sus puertas: ${client.user.tag} en línea.`);
   console.log(`📖 Comandos disponibles: ${[...comandos.keys()].map((n) => `/${n}`).join(", ")}`);
   iniciarTwitch(client);
+  iniciarPuenteDjinni(client);
+});
+
+// Si el canal de voz se queda sin humanos, el bot se retira solo a los 5 min.
+client.on("voiceStateUpdate", (oldState, newState) => {
+  for (const estado of [oldState, newState]) {
+    if (estado?.guild) programarSalidaSiVacio(estado.guild, client);
+  }
 });
 
 client.on("interactionCreate", async (interaction) => {

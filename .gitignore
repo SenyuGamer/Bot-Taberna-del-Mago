@@ -22,3 +22,6 @@ Thumbs.db
 # --- Scripts locales de Windows (deploy remoto; cada dev usa el suyo) ---
 deploy-taberna.bat
 *.local.bat
+
+# --- Build del fork de Djinni (se compila en el PC y se sube a la Pi) ---
+src/djinni/build/

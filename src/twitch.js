@@ -4,6 +4,7 @@ import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { getConfig, addInspirations } from "./db.js";
 import { TEMA, embed, enviarRegistro } from "./utils.js";
+import { puenteListo, registrarRutaTemporal } from "./djinniBridge.js";
 
 // Adaptado de OwlTwitch backend: eventsub.ts + twitch-auth.ts (versión reducida
 // para un solo canal: detectar canjes de puntos de canal en el chat de Twitch).
@@ -164,89 +165,128 @@ export function iniciarFlujoOAuth({ port = Number(process.env.TWITCH_AUTH_PORT |
     force_verify: "true",
   });
 
-  let server;
-  let timer;
-  const cleanup = () => {
-    clearTimeout(timer);
-    try { server?.close(); } catch {}
-  };
+  let cleanup;
+  let promesa;
 
-  const promesa = new Promise((resolve, reject) => {
-    server = http.createServer(async (req, res) => {
-      const url = new URL(req.url ?? "/", "http://localhost");
-      const html = (codigo) => {
-        res.writeHead(codigo, { "Content-Type": "text/html; charset=utf-8" });
-      };
-      if (url.pathname !== callbackPath) {
-        html(404);
-        res.end("Nada por aquí. Vuelve a Discord.");
-        return;
-      }
+  if (puenteListo()) {
+    // El bridge de Djinni ya está escuchando; usamos su ruta temporal
+    const rta = registrarRutaTemporal(callbackPath, {
+      timeoutMs,
+      manejador: async (url) => {
+        const code = url.searchParams.get("code");
+        const errorDesc = url.searchParams.get("error_description");
+        if (!code) {
+          return { status: 400, html: `<p>❌ Error de autorización: ${errorDesc ?? "sin código"}</p>`, rechazar: errorDesc ?? "Twitch no devolvió el código de autorización." };
+        }
+        if (url.searchParams.get("state") !== state) {
+          return { status: 400, html: "<p>❌ Estado OAuth inválido. Vuelve a Discord y reintenta el comando.</p>", rechazar: "El parámetro 'state' no coincide." };
+        }
+        try {
+          const body = new URLSearchParams({
+            client_id: TWITCH_CLIENT_ID,
+            client_secret: TWITCH_CLIENT_SECRET,
+            code,
+            grant_type: "authorization_code",
+            redirect_uri: redirectUri,
+          });
+          const tokenRes = await fetch(TOKEN_URL, { method: "POST", body });
+          const data = await tokenRes.json();
+          if (!tokenRes.ok) {
+            return { status: 500, html: "<p>❌ Error obteniendo el token. Vuelve a Discord.</p>", rechazar: `Twitch respondió ${tokenRes.status}: ${data.message ?? "error desconocido"}` };
+          }
+          return { status: 200, html: "<h1>✅ Twitch sincronizado</h1><p>Ya puedes cerrar esta pestaña y volver a Discord.</p>", valor: { access_token: data.access_token, refresh_token: data.refresh_token } };
+        } catch (error) {
+          return { status: 500, html: "<p>Error de red.</p>", rechazar: `Error de red: ${error.message}` };
+        }
+      },
+    });
+    promesa = rta.promesa;
+    cleanup = () => {};
+  } else {
+    let server;
+    let timer;
+    cleanup = () => {
+      clearTimeout(timer);
+      try { server?.close(); } catch {}
+    };
 
-      const code = url.searchParams.get("code");
-      const errorDesc = url.searchParams.get("error_description");
-      if (!code) {
-        html(400);
-        res.end(`<p>❌ Error de autorización: ${errorDesc ?? "sin código"}</p>`);
-        cleanup();
-        reject(new Error(errorDesc ?? "Twitch no devolvió el código de autorización."));
-        return;
-      }
-
-      if (url.searchParams.get("state") !== state) {
-        html(400);
-        res.end("<p>❌ Estado OAuth inválido. Vuelve a Discord y reintenta el comando.</p>");
-        cleanup();
-        reject(new Error("El parámetro 'state' no coincide (posible petición ajena al flujo)."));
-        return;
-      }
-
-      try {
-        const body = new URLSearchParams({
-          client_id: TWITCH_CLIENT_ID,
-          client_secret: TWITCH_CLIENT_SECRET,
-          code,
-          grant_type: "authorization_code",
-          redirect_uri: redirectUri,
-        });
-        const tokenRes = await fetch(TOKEN_URL, { method: "POST", body });
-        const data = await tokenRes.json();
-
-        if (!tokenRes.ok) {
-          html(500);
-          res.end("<p>❌ Error obteniendo el token. Vuelve a Discord.</p>");
-          cleanup();
-          reject(new Error(`Twitch respondió ${tokenRes.status}: ${data.message ?? "error desconocido"}`));
+    promesa = new Promise((resolve, reject) => {
+      server = http.createServer(async (req, res) => {
+        const url = new URL(req.url ?? "/", "http://localhost");
+        const html = (codigo) => {
+          res.writeHead(codigo, { "Content-Type": "text/html; charset=utf-8" });
+        };
+        if (url.pathname !== callbackPath) {
+          html(404);
+          res.end("Nada por aquí. Vuelve a Discord.");
           return;
         }
 
-        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-        res.end("<h1>✅ Twitch sincronizado</h1><p>Ya puedes cerrar esta pestaña y volver a Discord.</p>");
+        const code = url.searchParams.get("code");
+        const errorDesc = url.searchParams.get("error_description");
+        if (!code) {
+          html(400);
+          res.end(`<p>❌ Error de autorización: ${errorDesc ?? "sin código"}</p>`);
+          cleanup();
+          reject(new Error(errorDesc ?? "Twitch no devolvió el código de autorización."));
+          return;
+        }
+
+        if (url.searchParams.get("state") !== state) {
+          html(400);
+          res.end("<p>❌ Estado OAuth inválido. Vuelve a Discord y reintenta el comando.</p>");
+          cleanup();
+          reject(new Error("El parámetro 'state' no coincide (posible petición ajena al flujo)."));
+          return;
+        }
+
+        try {
+          const body = new URLSearchParams({
+            client_id: TWITCH_CLIENT_ID,
+            client_secret: TWITCH_CLIENT_SECRET,
+            code,
+            grant_type: "authorization_code",
+            redirect_uri: redirectUri,
+          });
+          const tokenRes = await fetch(TOKEN_URL, { method: "POST", body });
+          const data = await tokenRes.json();
+
+          if (!tokenRes.ok) {
+            html(500);
+            res.end("<p>❌ Error obteniendo el token. Vuelve a Discord.</p>");
+            cleanup();
+            reject(new Error(`Twitch respondió ${tokenRes.status}: ${data.message ?? "error desconocido"}`));
+            return;
+          }
+
+          res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+          res.end("<h1>✅ Twitch sincronizado</h1><p>Ya puedes cerrar esta pestaña y volver a Discord.</p>");
+          cleanup();
+          resolve({ access_token: data.access_token, refresh_token: data.refresh_token });
+        } catch (error) {
+          try { res.writeHead(500); res.end("Error de red."); } catch {}
+          cleanup();
+          reject(new Error(`Error de red hablando con Twitch: ${error.message}`));
+        }
+      });
+
+      server.on("error", (error) => {
+        clearTimeout(timer);
+        reject(new Error(`No se pudo abrir el puerto ${port}: ${error.message} (¿lo está usando otra cosa?)`));
+      });
+
+      timer = setTimeout(() => {
         cleanup();
-        resolve({ access_token: data.access_token, refresh_token: data.refresh_token });
-      } catch (error) {
-        try { res.writeHead(500); res.end("Error de red."); } catch {}
-        cleanup();
-        reject(new Error(`Error de red hablando con Twitch: ${error.message}`));
-      }
+        reject(new Error(`Se agotó el tiempo de espera (${Math.round(timeoutMs / 60000)} min). Vuelve a usar el comando.`));
+      }, timeoutMs);
+
+      server.listen(port);
     });
 
-    server.on("error", (error) => {
-      clearTimeout(timer);
-      reject(new Error(`No se pudo abrir el puerto ${port}: ${error.message} (¿lo está usando otra cosa?)`));
-    });
-
-    timer = setTimeout(() => {
-      cleanup();
-      reject(new Error(`Se agotó el tiempo de espera (${Math.round(timeoutMs / 60000)} min). Vuelve a usar el comando.`));
-    }, timeoutMs);
-
-    server.listen(port);
-  });
-
-  // Evita un "unhandledRejection" fatal si el rechazo ocurre antes de que el
-  // consumidor (comando o CLI) adjunte su await. El rechazo sigue propagándose.
-  promesa.catch(() => {});
+    // Evita un "unhandledRejection" fatal si el rechazo ocurre antes de que el
+    // consumidor (comando o CLI) adjunte su await. El rechazo sigue propagándose.
+    promesa.catch(() => {});
+  }
 
   return { authUrl: authUrl.href, redirectUri, state, promesa };
 }
