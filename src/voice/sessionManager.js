@@ -198,8 +198,10 @@ export function aplicarEstadoDjinni(guildId, estado) {
   for (const [id, deseado] of deseados) {
     const existente = s.fuentes.get(id);
     if (!existente) {
-      agregarFuente(guildId, { id, url: deseado.url, volumen: deseado.volumen, loop: deseado.loop, loopDelayMs: deseado.loopDelayMs, tipo: "djinni",
+      const creado = agregarFuente(guildId, { id, url: deseado.url, volumen: deseado.volumen, loop: deseado.loop, loopDelayMs: deseado.loopDelayMs, tipo: "djinni",
         onError: (e) => console.error(`🎵 Fuente Djinni ${id} falló:`, e.message) });
+      // Evita unhandledRejection cuando el DM cambia de pista y la tubería falla
+      creado?.promesa.catch(() => {});
     } else if (Math.abs(existente.volumen - deseado.volumen) > 0.01) {
       existente.volumen = deseado.volumen;
       s.mixer.setVolumen(id, deseado.volumen);

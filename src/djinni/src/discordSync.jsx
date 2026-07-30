@@ -6,8 +6,11 @@
 //  no empujan nada, evitando duplicados).
 //
 //  ANTES DEL BUILD (`npm run build`), configura estas dos constantes:
+import OBR from "@owlbear-rodeo/sdk";
+import { useMetadataStore } from "./metadataStore";
+
 const BRIDGE_URL = "https://owltwitch.cobaltcatstudios.com"; // tu túnel (sin barra final)
-const BRIDGE_SLUG = "PEGA_AQUI_TU_SLUG";                 // el DJINNI_SLUG del .env del bot
+const BRIDGE_SLUG = "78d6658ada193c8d480e599c007181567830"; // el DJINNI_SLUG del .env del bot
 // ============================================================================
 
 const ENDPOINT = `${BRIDGE_URL}/api/state/${BRIDGE_SLUG}`;
@@ -76,7 +79,7 @@ export function instalarDiscordSync() {
 	if (instalado) return;
 	instalado = true;
 
-	if (!OBR?.onReady) {
+	if (typeof OBR === "undefined" || !OBR?.onReady) {
 		console.warn("[DiscordSync] OBR no disponible (¿preview fuera de Owlbear?). Sincronización omitida.");
 		return;
 	}
