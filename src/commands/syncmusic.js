@@ -81,7 +81,7 @@ export const syncmusic = {
 
     await interaction.deferReply();
     try {
-      await unir(interaction.guild, canal);
+      await unir(interaction.guild, canal, interaction.client.user.id);
     } catch (error) {
       return interaction.editReply({ embeds: [embedError(error.message)] });
     }

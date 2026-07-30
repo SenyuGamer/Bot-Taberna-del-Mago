@@ -6,6 +6,7 @@ import {
   entersState,
   VoiceConnectionStatus,
 } from "@discordjs/voice";
+import { PermissionsBitField } from "discord.js";
 import { Mixer, clampVolumen } from "./mixer.js";
 import { crearPipeline } from "./pipeline.js";
 import { setCanalDjinni, getCanalDjinni } from "../db.js";
@@ -29,8 +30,16 @@ export function listarSesiones() {
 }
 
 /** Une (o mueve) el bot al canal de voz indicado y crea la sesión. */
-export async function unir(guild, canal) {
+export async function unir(guild, canal, clientId) {
   parar(guild.id); // limpieza si había una sesión previa
+
+  const perms = canal.permissionsFor(clientId);
+  const necesarios = [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.Connect, PermissionsBitField.Flags.Speak];
+  const faltantes = necesarios.filter((p) => !perms?.has(p));
+  if (faltantes.length > 0) {
+    const nombres = faltantes.map((p) => Object.entries(PermissionsBitField.Flags).find(([, v]) => v === p)?.[0] ?? String(p));
+    throw new Error(`Al bot le faltan permisos en <#${canal.id}>: ${nombres.join(", ")}. Revísalos en Configuración del canal > Permisos.`);
+  }
 
   const connection = joinVoiceChannel({
     channelId: canal.id,
