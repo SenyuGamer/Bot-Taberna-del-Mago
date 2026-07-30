@@ -93,6 +93,13 @@ ok ".env presente"
 info "npm ci --omit=dev"
 npm ci --omit=dev
 
+# Stub RISC-V: @snazzah/davey no tiene binario para riscv64
+if [ -f "$APP_DIR/node_modules/@snazzah/davey/index.js" ]; then
+  info "Inyectando stub de @snazzah/davey para RISC-V..."
+  cp "$APP_DIR/scripts/davey-stub.js" "$APP_DIR/node_modules/@snazzah/davey/index.js"
+  ok "Stub de davey inyectado"
+fi
+
 # ---------- 4. Comandos de Discord (solo si cambiaron) ----------
 
 if [ "$COMMIT_ANTES" != "$COMMIT_DESPUES" ] \
