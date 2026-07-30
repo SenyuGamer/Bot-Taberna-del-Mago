@@ -1,7 +1,7 @@
 // Stub para @snazzah/davey en RISC-V (sin binario nativo).
 // DAVE (Discord Audio Video Encryption) no está activo en la mayoría de servidores;
 // este stub carga ok y solo falla si Discord realmente negocia DAVE.
-const DAVE_PROTOCOL_VERSION = "";
+const DAVE_PROTOCOL_VERSION = "1";
 const DEBUG_BUILD = false;
 const VERSION = "0.0.0-stub";
 

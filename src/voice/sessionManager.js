@@ -38,6 +38,7 @@ export async function unir(guild, canal) {
     adapterCreator: guild.voiceAdapterCreator,
     selfDeaf: false,
     selfMute: false,
+    daveEncryption: false, // RISC-V: sin binario nativo de davey, usamos cifrado clásico
   });
 
   const player = createAudioPlayer();
