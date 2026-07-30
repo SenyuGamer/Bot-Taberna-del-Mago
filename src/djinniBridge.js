@@ -6,8 +6,8 @@ import { aplicarEstadoDjinniGlobal, listarSesiones } from "./voice/sessionManage
 
 // Puente HTTP Djinni → Discord.
 // - La extensión (navegador del DM) hace POST del estado de reproducción.
-// - Se sirve el build estático del fork (manifest.json incluido) en el mismo host,
-//   así el fetch de la extensión es same-origin y no hay pelea con CORS.
+// - Se sirve el build estático del fork (manifest.json incluido) con CORS porque
+//   Owlbear Rodeo carga la extensión desde otro origen (owlbear.rodeo).
 // Sin puertos abiertos: sale por el túnel de Cloudflare.
 
 const DJINNI_PORT = Number(process.env.DJINNI_PORT || 0);
@@ -70,6 +70,16 @@ export function registrarRutaTemporal(path, { timeoutMs = 5 * 60_000, manejador 
 export function crearAppDjinni() {
   const app = express();
   app.disable("x-powered-by");
+
+  // CORS: Owlbear Rodeo carga la extensión desde owlbear.rodeo (origen cruzado)
+  app.use((req, res, next) => {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+    if (req.method === "OPTIONS") return res.sendStatus(204);
+    next();
+  });
+
   app.use(express.text({ type: "text/plain", limit: "128kb" })); // para sendBeacon al cerrar la pestaña
   app.use(express.json({ limit: "128kb" }));
 
@@ -114,11 +124,6 @@ export function crearAppDjinni() {
       }
     });
   });
-
-  // Estáticos del fork compilado (Owlbear carga manifest.json desde aquí)
-  if (existsSync(resolve(DJINNI_DIR))) {
-    app.use(express.static(resolve(DJINNI_DIR)));
-  }
 
   // Estáticos del fork compilado (Owlbear carga manifest.json desde aquí)
   if (existsSync(resolve(DJINNI_DIR))) {
