@@ -7,6 +7,10 @@ module.exports = {
 		"eslint:recommended",
 		"plugin:react/recommended"
 	],
+	"globals": {
+		"OBR": "readonly",
+		"useMetadataStore": "readonly"
+	},
 	"overrides": [
 		{
 			"env": {
