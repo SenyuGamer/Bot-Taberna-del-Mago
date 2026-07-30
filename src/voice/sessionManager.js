@@ -50,6 +50,12 @@ export async function unir(guild, canal) {
   connection.on("stateChange", (_viejo, nuevo) => {
     console.log(`🎵 Voz (${guild.name}): ${nuevo.status}`);
   });
+  connection.on("error", (error) => {
+    console.error(`🎵 Error de conexión de voz en ${guild.name}:`, error.message, error);
+  });
+  connection.on("debug", (msg) => {
+    console.log(`🎵 Voz debug (${guild.name}):`, msg);
+  });
   player.on("error", (error) => {
     console.error(`🎵 Error del reproductor en ${guild.name}:`, error.message);
   });

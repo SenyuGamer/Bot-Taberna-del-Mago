@@ -42,6 +42,9 @@ export function crearPipeline({ url, loop = false, loopDelayMs, onDatos, onFin, 
     ffActual = ff;
 
     yt.stdout.pipe(ff.stdin);
+    ff.stdin.on("error", () => {}); // EPIPE esperable al cerrar la tubería
+    yt.stdout.on("error", () => {});
+    ff.stdout.on("error", () => {});
 
     ff.stdout.on("data", (bytes) => {
       if (detenido) return;
