@@ -4,6 +4,7 @@ import { inspiracion } from "./commands/inspiracion.js";
 import { dm } from "./commands/dm.js";
 import { registros } from "./commands/registros.js";
 import { sincronizar } from "./commands/sincronizar.js";
+import { hora } from "./commands/hora.js";
 import { embedError } from "./utils.js";
 import { iniciarTwitch } from "./twitch.js";
 
@@ -14,7 +15,7 @@ if (!token || token === "pega_aqui_tu_token") {
 }
 
 export const comandos = new Map(
-  [estrellitas, estrellitasNegras, inspiracion, dm, registros, sincronizar].map((c) => [c.data.name, c])
+  [estrellitas, estrellitasNegras, inspiracion, dm, registros, sincronizar, hora].map((c) => [c.data.name, c])
 );
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });

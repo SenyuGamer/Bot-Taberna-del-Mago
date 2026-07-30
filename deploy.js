@@ -4,6 +4,7 @@ import { inspiracion } from "./src/commands/inspiracion.js";
 import { dm } from "./src/commands/dm.js";
 import { registros } from "./src/commands/registros.js";
 import { sincronizar } from "./src/commands/sincronizar.js";
+import { hora } from "./src/commands/hora.js";
 
 const { DISCORD_TOKEN, CLIENT_ID, GUILD_ID } = process.env;
 
@@ -12,7 +13,7 @@ if (!DISCORD_TOKEN || !CLIENT_ID) {
   process.exit(1);
 }
 
-const body = [estrellitas, estrellitasNegras, inspiracion, dm, registros, sincronizar].map((c) =>
+const body = [estrellitas, estrellitasNegras, inspiracion, dm, registros, sincronizar, hora].map((c) =>
   c.data.toJSON()
 );
 

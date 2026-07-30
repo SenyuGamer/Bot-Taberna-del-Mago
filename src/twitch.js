@@ -158,7 +158,10 @@ export function iniciarFlujoOAuth({ port = Number(process.env.TWITCH_AUTH_PORT |
     response_type: "code",
     scope: SCOPE_NECESARIO,
     state,
-    force_verify: "false",
+    // force_verify=true: Twitch siempre enseña la pantalla de autorización,
+    // así al re-sincronizar puedes CAMBIAR la cuenta del canal (si no, Twitch
+    // auto-aprueba con la cuenta que esté logueada en el navegador).
+    force_verify: "true",
   });
 
   let server;
