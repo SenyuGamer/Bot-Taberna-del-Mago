@@ -21,6 +21,7 @@ WorkingDirectory=/opt/taberna-mago
 ExecStart=/usr/bin/env node --env-file=.env --disable-warning=ExperimentalWarning src/index.js
 
 Environment=NODE_ENV=production
+Environment=DEBUG=@discordjs/voice*
 
 # Reinicio automático si el proceso muere (el bot no usa puertos entrantes)
 Restart=always
