@@ -33,9 +33,18 @@ client.once("clientReady", () => {
 
 // Si el canal de voz se queda sin humanos, el bot se retira solo a los 5 min.
 client.on("voiceStateUpdate", (oldState, newState) => {
+  console.log("🎤 Discord.js voiceStateUpdate:", { guild: newState.guild?.id, channel: newState.channelId, session: newState.sessionId });
   for (const estado of [oldState, newState]) {
     if (estado?.guild) programarSalidaSiVacio(estado.guild, client);
   }
+});
+
+// Debug de eventos crudos de voz del gateway
+client.ws.on("VOICE_SERVER_UPDATE", (data) => {
+  console.log("🎤 Discord.js raw VOICE_SERVER_UPDATE:", JSON.stringify(data));
+});
+client.ws.on("VOICE_STATE_UPDATE", (data) => {
+  console.log("🎤 Discord.js raw VOICE_STATE_UPDATE:", JSON.stringify(data));
 });
 
 client.on("interactionCreate", async (interaction) => {
