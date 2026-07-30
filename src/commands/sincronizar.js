@@ -41,13 +41,17 @@ export const sincronizar = {
     try {
       const flujo = iniciarFlujoOAuth();
 
+      const avisoLocal = flujo.redirectUri.startsWith("http://localhost")
+        ? `\n\n⚠️ **Ojo**: el bot está usando \`${flujo.redirectUri}\` porque falta \`TWITCH_CALLBACK_URL\` en el .env del bot. Si el bot corre en un servidor, debes configurar en su .env la URL pública de tu túnel y reiniciar; de lo contrario Twitch te dirá *redirect_mismatch*.`
+        : "";
+
       await interaction.reply({
         embeds: [
           embed(
             COLOR,
             `**1.** Abre el enlace e inicia sesión con la **cuenta del canal**:\n[🔗 Autorizar en Twitch](${flujo.authUrl})\n\n` +
             `**2.** Acepta los permisos y vuelve aquí: en cuanto termines confirmo por este mismo mensaje. *(Tienes 5 minutos; solo tú ves este mensaje.)*\n\n` +
-            `⚙️ *Solo la primera vez: en https://dev.twitch.tv/console/apps → tu aplicación, registra esta URL de redirección:*\n\`${flujo.redirectUri}\``,
+            `⚙️ *Solo la primera vez: en https://dev.twitch.tv/console/apps → tu aplicación, registra esta URL de redirección:*\n\`${flujo.redirectUri}\`${avisoLocal}`,
             "🦉 Sincronizar Twitch"
           ),
         ],

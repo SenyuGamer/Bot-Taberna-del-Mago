@@ -144,6 +144,9 @@ export function iniciarFlujoOAuth({ port = Number(process.env.TWITCH_AUTH_PORT |
   }
 
   const redirectUri = process.env.TWITCH_CALLBACK_URL || `http://localhost:${port}/callback`;
+  if (!process.env.TWITCH_CALLBACK_URL) {
+    console.warn(`⚠️ TWITCH_CALLBACK_URL no definida en .env: se usará ${redirectUri} (solo válido si el navegador está en la misma máquina que el bot). En un servidor, configura la URL pública de tu túnel y reinicia.`);
+  }
   const callbackPath = new URL(redirectUri).pathname;
   // state: protección CSRF estándar de OAuth — se verifica en el callback
   const state = randomBytes(16).toString("hex");
@@ -168,8 +171,11 @@ export function iniciarFlujoOAuth({ port = Number(process.env.TWITCH_AUTH_PORT |
   const promesa = new Promise((resolve, reject) => {
     server = http.createServer(async (req, res) => {
       const url = new URL(req.url ?? "/", "http://localhost");
+      const html = (codigo) => {
+        res.writeHead(codigo, { "Content-Type": "text/html; charset=utf-8" });
+      };
       if (url.pathname !== callbackPath) {
-        res.writeHead(404);
+        html(404);
         res.end("Nada por aquí. Vuelve a Discord.");
         return;
       }
@@ -177,16 +183,16 @@ export function iniciarFlujoOAuth({ port = Number(process.env.TWITCH_AUTH_PORT |
       const code = url.searchParams.get("code");
       const errorDesc = url.searchParams.get("error_description");
       if (!code) {
-        res.writeHead(400);
-        res.end(`Error de autorización: ${errorDesc ?? "sin código"}`);
+        html(400);
+        res.end(`<p>❌ Error de autorización: ${errorDesc ?? "sin código"}</p>`);
         cleanup();
         reject(new Error(errorDesc ?? "Twitch no devolvió el código de autorización."));
         return;
       }
 
       if (url.searchParams.get("state") !== state) {
-        res.writeHead(400);
-        res.end("Estado OAuth inválido. Vuelve a Discord y reintenta el comando.");
+        html(400);
+        res.end("<p>❌ Estado OAuth inválido. Vuelve a Discord y reintenta el comando.</p>");
         cleanup();
         reject(new Error("El parámetro 'state' no coincide (posible petición ajena al flujo)."));
         return;
@@ -204,8 +210,8 @@ export function iniciarFlujoOAuth({ port = Number(process.env.TWITCH_AUTH_PORT |
         const data = await tokenRes.json();
 
         if (!tokenRes.ok) {
-          res.writeHead(500);
-          res.end("Error obteniendo el token. Vuelve a Discord.");
+          html(500);
+          res.end("<p>❌ Error obteniendo el token. Vuelve a Discord.</p>");
           cleanup();
           reject(new Error(`Twitch respondió ${tokenRes.status}: ${data.message ?? "error desconocido"}`));
           return;
