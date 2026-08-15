@@ -95,12 +95,14 @@ export function crearPipeline({ url, loop = false, loopDelayMs, onDatos, onFin, 
     ytActual = yt;
     ffActual = ff;
 
-    yt?.stdout.pipe(ff.stdin);
-    ff.stdin.on("error", () => {}); // EPIPE esperable al cerrar la tubería
-    yt?.stdout.on("error", () => {});
-    ff.stdout.on("error", () => {});
+    // Al leer desde caché, ffmpeg se lanza con stdin "ignore" → ff.stdin es null:
+    // encadenamos todos los flujos de forma segura.
+    if (yt?.stdout && ff.stdin) yt.stdout.pipe(ff.stdin);
+    ff.stdin?.on("error", () => {}); // EPIPE esperable al cerrar la tubería
+    yt?.stdout?.on("error", () => {});
+    ff.stdout?.on("error", () => {});
 
-    ff.stdout.on("data", (bytes) => {
+    ff.stdout?.on("data", (bytes) => {
       if (detenido) return;
       if (!primerChunk) {
         primerChunk = true;
@@ -110,8 +112,8 @@ export function crearPipeline({ url, loop = false, loopDelayMs, onDatos, onFin, 
     });
 
     let erroresYt = "";
-    yt?.stderr.on("data", (d) => { erroresYt += d.toString(); });
-    ff.stderr.on("data", () => {}); // ffmpeg -loglevel error: solo ruido informativo
+    yt?.stderr?.on("data", (d) => { erroresYt += d.toString(); });
+    ff.stderr?.on("data", () => {}); // ffmpeg -loglevel error: solo ruido informativo
 
     yt?.on("error", (error) => {
       if (detenido) return;
