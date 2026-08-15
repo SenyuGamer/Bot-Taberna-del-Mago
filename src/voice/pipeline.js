@@ -21,10 +21,16 @@ const FFMPEG = process.env.FFMPEG_PATH || "ffmpeg";
 export function crearPipeline({ url, loop = false, loopDelayMs, onDatos, onFin, onError, rutas = {} }) {
   const cmdYt = rutas.yt ?? YTDLP;
   const cmdFf = rutas.ff ?? FFMPEG;
+  const MAX_REINTENTOS = 4;
   let ytActual = null;
   let ffActual = null;
   let detenido = false;
-  let primerChunk = true;
+  let primerChunk = false;
+  let reintentos = 0;
+  let reintentando = false;
+  const eventos = {};
+
+  const finalizarError = (e) => { if (!detenido) onError?.(e); };
 
   const lanzar = () => {
     if (detenido) return;
@@ -35,9 +41,10 @@ export function crearPipeline({ url, loop = false, loopDelayMs, onDatos, onFin, 
       yt = spawn(cmdYt, ["--no-playlist", "--no-progress", "-f", "bestaudio/best", "-o", "-", url], { stdio: ["ignore", "pipe", "pipe"] });
       ff = spawn(cmdFf, ["-hide_banner", "-loglevel", "error", "-i", "pipe:0", "-vn", "-f", "s16le", "-ar", "48000", "-ac", "2", "pipe:1"], { stdio: ["pipe", "pipe", "pipe"] });
     } catch (error) {
-      onError?.(new Error(`No se pudo lanzar la tubería de audio: ${error.message}`));
+      finalizarError(new Error(`No se pudo lanzar la tubería de audio: ${error.message}`));
       return;
     }
+    reintentando = false;
     ytActual = yt;
     ffActual = ff;
 
@@ -48,8 +55,8 @@ export function crearPipeline({ url, loop = false, loopDelayMs, onDatos, onFin, 
 
     ff.stdout.on("data", (bytes) => {
       if (detenido) return;
-      if (primerChunk) {
-        primerChunk = false;
+      if (!primerChunk) {
+        primerChunk = true;
         eventos.primerChunk?.();
       }
       onDatos?.(bytes);
@@ -61,19 +68,25 @@ export function crearPipeline({ url, loop = false, loopDelayMs, onDatos, onFin, 
 
     yt.on("error", (error) => {
       if (detenido) return;
-      onError?.(new Error(`yt-dlp no disponible o falló al iniciar: ${error.message}. ¿Está instalado en la Pi? (apt install yt-dlp)`));
+      finalizarError(new Error(`yt-dlp no disponible o falló al iniciar: ${error.message}. ¿Está instalado en la Pi? (apt install yt-dlp)`));
     });
 
     yt.on("close", (code) => {
       try { ff.stdin.end(); } catch {}
-      if (!detenido && code && code !== 0) {
-        onError?.(new Error(`yt-dlp falló (código ${code}): ${erroresYt.trim().slice(-250) || "URL no soportada"}`));
+      if (detenido || primerChunk) return; // ya sonó algo: no reintentamos
+      if (code && code !== 0 && reintentos < MAX_REINTENTOS) {
+        // YouTube rate-limita las IP (HTTP 403) de forma intermitente: reintentamos.
+        reintentos++;
+        reintentando = true;
+        setTimeout(lanzar, 1500 * reintentos).unref?.();
+      } else if (code && code !== 0) {
+        finalizarError(new Error(`yt-dlp falló (código ${code}): ${erroresYt.trim().slice(-250) || "URL no soportada"}`));
       }
     });
 
     ff.on("error", (error) => {
       if (detenido) return;
-      onError?.(new Error(`ffmpeg no disponible o falló al iniciar: ${error.message}. ¿Está instalado en la Pi? (apt install ffmpeg)`));
+      finalizarError(new Error(`ffmpeg no disponible o falló al iniciar: ${error.message}. ¿Está instalado en la Pi? (apt install ffmpeg)`));
     });
 
     ff.on("close", (code) => {
@@ -83,13 +96,16 @@ export function crearPipeline({ url, loop = false, loopDelayMs, onDatos, onFin, 
       if (loop) {
         const espera = typeof loopDelayMs === "function" ? loopDelayMs() : (loopDelayMs ?? 750);
         setTimeout(() => { if (!detenido) lanzar(); }, espera).unref?.();
+      } else if (!primerChunk && reintentando) {
+        // El reintento está en curso; esperamos a su desenlace.
+      } else if (!primerChunk) {
+        finalizarError(new Error("La tubería de audio terminó sin emitir audio."));
       } else {
         onFin?.(code);
       }
     });
   };
 
-  const eventos = {};
   lanzar();
 
   return {
@@ -106,7 +122,7 @@ export function crearPipeline({ url, loop = false, loopDelayMs, onDatos, onFin, 
       retraso.unref?.();
     },
     /** Resuelve con el primer chunk PCM (la URL suena) o rechaza al primer error. */
-    esperarPrimerAudio(timeoutMs = 12_000) {
+    esperarPrimerAudio(timeoutMs = 30_000) {
       return new Promise((resolve, reject) => {
         const t = setTimeout(() => reject(new Error("Tiempo agotado esperando audio (¿URL válida de YouTube?)")), timeoutMs);
         t.unref?.();
