@@ -1,4 +1,4 @@
-/* Estética DJGAMBIT (oscura, tarjetas cuadradas con icono grande encima, nombre debajo) */
+/* Estética DJGAMBIT (oscura, tarjetas con icono grande encima y nombre debajo) */
 .app {
   display: flex;
   flex-direction: column;
@@ -27,35 +27,39 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
 }
 
 .cab-right {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
 }
 
 .toggle {
   display: inline-flex;
   align-items: center;
-  gap: 1px;
+  gap: 3px;
   cursor: pointer;
-  opacity: 0.9;
+  opacity: 0.95;
   user-select: none;
+  font-size: 16px;
 }
 
 .toggle input[type="checkbox"] {
   accent-color: rgb(129, 77, 222);
   cursor: pointer;
+  width: 14px;
+  height: 14px;
 }
 
 .titulo {
-  font-size: 15px;
+  font-size: 17px;
   font-weight: 700;
 }
 
 .aviso {
-  font-size: 12px;
+  font-size: 13px;
   opacity: 0.9;
 }
 
@@ -73,8 +77,8 @@
   border-bottom: 2px solid rgb(192, 194, 199);
   background-color: transparent;
   color: white;
-  height: 26px;
-  font-size: 13px;
+  height: 32px;
+  font-size: 15px;
 }
 
 .input:focus {
@@ -84,11 +88,11 @@
 .boton {
   border: 0;
   border-radius: 8px;
-  padding: 8px 14px;
+  padding: 10px 16px;
   background: rgb(41, 45, 60);
   color: white;
   cursor: pointer;
-  font-size: 13px;
+  font-size: 15px;
   transition: background-color 100ms linear;
 }
 
@@ -110,46 +114,99 @@
 }
 
 .boton-chico {
-  padding: 2px 8px;
-  font-size: 14px;
+  padding: 6px 10px;
+  font-size: 16px;
 }
 
 .boton-nueva {
-  width: 100%;
-  height: 92px;
+  width: 110px;
+  height: 58px;
   font-size: 30px;
-  border-radius: 5px;
+  border-radius: 8px;
   background-color: rgb(41, 45, 60);
   color: #c0c2c7;
+  align-self: flex-start;
 }
 
 .boton-parar {
   background: transparent;
-  font-size: 18px;
+  font-size: 22px;
 }
 
 .mensajes {
-  min-height: 16px;
+  min-height: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
-.ok { color: #7edc9a; font-size: 12px; }
-.error { color: #ff7070; font-size: 12px; }
+.ok { color: #7edc9a; font-size: 13px; }
+.error { color: #ff7070; font-size: 13px; }
 
-/* Escenario: fila horizontal de tarjetas (con scroll si hay muchas) */
+.cache-aviso {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Escenario: lista vertical de categorías (cada una es una fila horizontal con scroll) */
 .escenario {
   display: flex;
-  gap: 7px;
-  overflow-x: auto;
-  overflow-y: hidden;
+  flex-direction: column;
+  gap: 10px;
+  overflow-y: auto;
+  overflow-x: hidden;
   flex: 1;
   min-height: 0;
   padding-bottom: 4px;
 }
 
+.cat {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.cat-cab {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 2px;
+}
+
+.cat-nombre {
+  font-size: 13px;
+  font-weight: 700;
+  color: rgb(187, 153, 255);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.toggle-cat {
+  opacity: 0.85;
+}
+
+.toggle-cat.activa {
+  color: rgb(255, 196, 87);
+}
+
+.cat-loop-ico {
+  font-size: 16px;
+}
+
+.cat-fila {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 4px;
+}
+
 .escena {
   position: relative;
-  width: 88px;
-  height: 92px;
+  width: 110px;
+  height: 116px;
   flex-shrink: 0;
 }
 
@@ -157,7 +214,7 @@
   width: 100%;
   height: 100%;
   border: 2px solid rgba(0, 0, 0, 0);
-  border-radius: 5px;
+  border-radius: 10px;
   background-color: rgb(41, 45, 60);
   color: white;
   cursor: pointer;
@@ -166,7 +223,7 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  gap: 8px;
   transition: background-color 100ms linear;
 }
 
@@ -184,19 +241,19 @@
 }
 
 .icono {
-  font-size: 34px;
+  font-size: 44px;
   line-height: 1;
 }
 
 .escena-fila {
   width: 100%;
-  padding: 0 4px;
+  padding: 0 6px;
   text-align: left;
-  font-size: 10px;
+  font-size: 12px;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 3px;
+  gap: 4px;
 }
 
 .nombre {
@@ -209,53 +266,69 @@
 }
 
 .badge {
-  font-size: 10px;
+  font-size: 12px;
 }
 
+/* Botones pequeños sobre cada tarjeta (siempre visibles) */
 .basura {
   position: absolute;
-  top: 2px;
-  right: 2px;
+  top: 5px;
+  right: 5px;
   border: 0;
-  background: rgba(0, 0, 0, 0.45);
-  border-radius: 8px;
-  font-size: 11px;
-  padding: 2px 4px;
+  background: rgba(0, 0, 0, 0.55);
+  border-radius: 10px;
+  font-size: 15px;
+  line-height: 1;
+  padding: 4px 6px;
   cursor: pointer;
-  opacity: 0;
-  transition: opacity 100ms linear;
+  opacity: 0.9;
+  transition: opacity 100ms linear, background-color 100ms linear;
 }
 
-.escena:hover .basura { opacity: 1; }
+.basura:hover { opacity: 1; background: rgba(200, 60, 60, 0.7); }
 
-/* Descargar a caché (botón pequeño arriba a la izquierda de la tarjeta) */
-.descarga {
+/* Bucle de la canción */
+.loop-btn {
   position: absolute;
-  top: 2px;
-  left: 2px;
+  top: 5px;
+  left: 5px;
   border: 0;
-  background: rgba(0, 0, 0, 0.45);
-  border-radius: 8px;
-  font-size: 11px;
-  padding: 2px 4px;
+  background: rgba(0, 0, 0, 0.55);
+  border-radius: 10px;
+  font-size: 15px;
+  line-height: 1;
+  padding: 4px 6px;
   cursor: pointer;
-  opacity: 0.85;
-  transition: opacity 100ms linear;
+  opacity: 0.9;
+  transition: opacity 100ms linear, background-color 100ms linear, transform 100ms linear;
 }
 
-.descarga:hover { opacity: 1; }
-.descarga:disabled { opacity: 0.35; cursor: default; }
+.loop-btn:hover { opacity: 1; background: rgba(255, 255, 255, 0.2); }
+.loop-btn.activo { background: rgb(129, 77, 222); opacity: 1; }
+
+/* Indicador de caché (en la tarjeta) */
+.cache-hecho {
+  position: absolute;
+  bottom: 5px;
+  right: 5px;
+  font-size: 13px;
+  color: #7edc9a;
+  background: rgba(0, 0, 0, 0.55);
+  border-radius: 8px;
+  padding: 1px 4px;
+  line-height: 1.2;
+}
 
 /* Formulario de añadir */
 .form {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  width: 200px;
+  gap: 8px;
+  width: 230px;
   flex-shrink: 0;
   background: rgb(34, 38, 57);
-  padding: 8px;
-  border-radius: 5px;
+  padding: 10px;
+  border-radius: 8px;
 }
 
 .fila {
@@ -266,8 +339,8 @@
 
 /* Spinner de carga */
 .spinner {
-  width: 26px;
-  height: 26px;
+  width: 30px;
+  height: 30px;
   border: 3px solid rgba(255, 255, 255, 0.25);
   border-top-color: white;
   border-radius: 50%;
@@ -276,12 +349,21 @@
 }
 
 .spinner-pequeno {
-  width: 12px;
-  height: 12px;
+  width: 14px;
+  height: 14px;
   border-width: 2px;
   display: inline-block;
   vertical-align: middle;
   margin-right: 6px;
+}
+
+.spinner-mini {
+  width: 11px;
+  height: 11px;
+  border-width: 2px;
+  display: inline-block;
+  vertical-align: middle;
+  margin: 0;
 }
 
 @keyframes spin {

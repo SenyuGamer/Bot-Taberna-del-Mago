@@ -201,6 +201,25 @@ export function crearPipeline({ url, loop = false, loopDelayMs, onDatos, onFin, 
   };
 }
 
+/** Ruta del archivo de caché de una URL (idempotente por sha256 de la URL). */
+export function rutaCache({ url, cacheDir = CACHE_DIR }) {
+  return join(cacheDir, `${createHash("sha256").update(url).digest("hex")}.weba`);
+}
+
+/** ¿La URL ya está guardada en caché (completa, en disco)? */
+export function existeCache({ url, cacheDir = CACHE_DIR }) {
+  return existsSync(rutaCache({ url, cacheDir }));
+}
+
+/** Borra de la caché la URL (archivo y parcial). Devuelve si existía. */
+export function borrarCache({ url, cacheDir = CACHE_DIR }) {
+  const archivo = rutaCache({ url, cacheDir });
+  try { rmSync(`${archivo}.part`, { force: true }); } catch {}
+  const existia = existsSync(archivo);
+  try { rmSync(archivo, { force: true }); } catch {}
+  return existia;
+}
+
 /**
  * Descarga SOLO a la caché (sin reproducir) para que la reproducción posterior
  * arranque rápido. Devuelve una promesa con { yaExistia }. Idempotente por URL.
@@ -210,7 +229,7 @@ export function precargarCache({ url, cacheDir = CACHE_DIR, rutas = {} }) {
   const cmdYt = rutas.yt ?? YTDLP;
   if (!/^https?:\/\//i.test(url)) return Promise.reject(new Error("Solo se puede precargar una URL HTTP."));
 
-  const archivo = join(cacheDir, `${createHash("sha256").update(url).digest("hex")}.weba`);
+  const archivo = rutaCache({ url, cacheDir });
   if (existsSync(archivo)) return Promise.resolve({ yaExistia: true });
 
   return new Promise((resolve, reject) => {

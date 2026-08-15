@@ -163,10 +163,15 @@ db.exec(`
   )
 `);
 
-const getMenuStmt = db.prepare("SELECT id, nombre, icono, url, loop FROM menu_canciones ORDER BY id ASC");
-const getCancionStmt = db.prepare("SELECT id, nombre, icono, url, loop FROM menu_canciones WHERE id = ?");
+// Migración: categoría de agrupación (listas de reproducción por categoría).
+try {
+  db.exec("ALTER TABLE menu_canciones ADD COLUMN categoria TEXT NOT NULL DEFAULT ''");
+} catch {}
+
+const getMenuStmt = db.prepare("SELECT id, nombre, icono, url, loop, categoria FROM menu_canciones ORDER BY id ASC");
+const getCancionStmt = db.prepare("SELECT id, nombre, icono, url, loop, categoria FROM menu_canciones WHERE id = ?");
 const insertCancionStmt = db.prepare(
-  "INSERT INTO menu_canciones (nombre, icono, url, loop, created_at) VALUES (?, ?, ?, ?, ?)"
+  "INSERT INTO menu_canciones (nombre, icono, url, loop, categoria, created_at) VALUES (?, ?, ?, ?, ?, ?)"
 );
 const deleteCancionStmt = db.prepare("DELETE FROM menu_canciones WHERE id = ?");
 
@@ -179,8 +184,8 @@ export function getCancionMenu(id) {
   return c ? { ...c, loop: !!c.loop } : null;
 }
 
-export function agregarCancionMenu({ nombre, icono = "", url, loop = false }) {
-  const info = insertCancionStmt.run(nombre, icono, url, loop ? 1 : 0, new Date().toISOString());
+export function agregarCancionMenu({ nombre, icono = "", url, loop = false, categoria = "" }) {
+  const info = insertCancionStmt.run(nombre, icono, url, loop ? 1 : 0, String(categoria).trim(), new Date().toISOString());
   return getCancionMenu(info.lastInsertRowid);
 }
 

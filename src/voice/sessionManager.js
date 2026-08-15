@@ -83,6 +83,7 @@ export async function unir(guild, canal, clientId) {
     fuentes: new Map(), // id -> {id, url, tipo, loop, volumen, userId, pipeline}
     temporizadorVacio: null,
     crossfadeTimer: null,
+    menuPlaylist: null, // { categoria, canciones, indice } — playlist por categoría activa
   };
   sesiones.set(guild.id, sesion);
   setCanalDjgambit(guild.id, canal.id);
@@ -190,8 +191,13 @@ const PASOS_CROSSFADE = 20;
 export function reproducirCancionMenu(guildId, { id = null, url, nombre = "", loop = false, crossfadeMs = 0 }) {
   const s = sesiones.get(guildId);
   if (!s) return null;
+  s.menuPlaylist = null; // una reproducción manual cancela el modo lista (playlist por categoría)
+  return _ponerCancionActiva(s, { id, url, nombre, loop }, crossfadeMs);
+}
 
-  // Durante la transición la "activa" sigue siendo la vieja; la nueva entra como "menu:transicion".
+/** Reproduce una canción concreta del menú y avanza la playlist al acabar. */
+function _ponerCancionActiva(s, { id, url, nombre, loop }, crossfadeMs) {
+  // Durante una transición la "activa" sigue siendo la vieja; la nueva entra como "menu:transicion".
   if (s.fuentes.has("menu:transicion")) {
     _quitarFuenteDeSesion(s, "menu:transicion");
     if (s.crossfadeTimer) { clearInterval(s.crossfadeTimer); s.crossfadeTimer = null; }
@@ -202,7 +208,7 @@ export function reproducirCancionMenu(guildId, { id = null, url, nombre = "", lo
   // El menú reproduce una canción a la vez (id estable "menu:activa").
   // Sin canción previa o sin crossfade: reemplazo directo.
   if (!activa || crossfadeMs <= 0) {
-    return agregarFuente(guildId, {
+    return agregarFuente(s.guildId, {
       id: "menu:activa",
       url,
       volumen: 1,
@@ -210,12 +216,13 @@ export function reproducirCancionMenu(guildId, { id = null, url, nombre = "", lo
       nombre,
       tipo: "menu",
       cancionId: id,
+      onFin: () => { if (!loop) _avanzarPlaylistPorFin(s.guildId); },
       onError: (e) => console.error(`🎵 Canción del menú falló:`, e.message),
     });
   }
 
   // Crossfade: la nueva entra con volumen 0 mientras la vieja se desvanece.
-  const creada = agregarFuente(guildId, {
+  const creada = agregarFuente(s.guildId, {
     id: "menu:transicion",
     url,
     volumen: 0,
@@ -258,11 +265,44 @@ export function reproducirCancionMenu(guildId, { id = null, url, nombre = "", lo
   return { promesa: creada.promesa };
 }
 
+/**
+ * Reproduce la categoría como una lista de reproducción (bucle al terminar):
+ * cuando una canción de la categoría acaba, suena la siguiente en orden (por id).
+ */
+export function reproducirPlaylistCategoria(guildId, { categoria = "", canciones = [], inicioId = null }) {
+  const s = sesiones.get(guildId);
+  if (!s || canciones.length === 0) return null;
+  if (s.fuentes.has("menu:transicion")) {
+    _quitarFuenteDeSesion(s, "menu:transicion");
+    if (s.crossfadeTimer) { clearInterval(s.crossfadeTimer); s.crossfadeTimer = null; }
+  }
+  let idx = 0;
+  if (inicioId != null) {
+    const hallado = canciones.findIndex((c) => c.id === inicioId);
+    idx = hallado >= 0 ? hallado : 0;
+  }
+  s.menuPlaylist = { categoria, canciones, indice: idx };
+  const primera = canciones[idx];
+  return _ponerCancionActiva(s, { id: primera.id, url: primera.url, nombre: primera.nombre, loop: false }, 0);
+}
+
+/** Al acabar una canción del menú, pasa a la siguiente de la playlist (y da la vuelta = loop). */
+function _avanzarPlaylistPorFin(guildId) {
+  const s = sesiones.get(guildId);
+  if (!s?.menuPlaylist) return;
+  const pl = s.menuPlaylist;
+  const siguiente = (pl.indice + 1) % pl.canciones.length;
+  pl.indice = siguiente;
+  const c = pl.canciones[siguiente];
+  _ponerCancionActiva(s, { id: c.id, url: c.url, nombre: c.nombre, loop: false }, 0);
+}
+
 /** Detiene la canción del menú si estaba sonando. */
 export function pararCancionMenu(guildId) {
   const s = sesiones.get(guildId);
   if (!s) return false;
   if (s.crossfadeTimer) { clearInterval(s.crossfadeTimer); s.crossfadeTimer = null; }
+  s.menuPlaylist = null;
   let quitada = false;
   for (const id of ["menu:activa", "menu:transicion"]) {
     if (s.fuentes.has(id)) {

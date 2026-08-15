@@ -1,14 +1,17 @@
 import "./App.css";
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import OBR from "@owlbear-rodeo/sdk";
 
 // Panel "DJGAMBIT · Taberna del Mago" para el DM.
 // - Solo se muestra al GM (la extensión, vista del DM).
 // - Se vincula a un servidor de Discord con un código (/musica vincular).
-// - Muestra el menú global de canciones como tarjetas horizontales (icono encima,
-//   nombre debajo), igual que la app original de DJGAMBIT.
+// - Muestra el menú global de canciones agrupado por categorías (tarjetas con
+//   icono encima y nombre debajo, como en la app original de DJGAMBIT).
 // - Clic en una tarjeta → suena SOLO en el bot de Discord (nunca aquí).
-// - Feedback: mientras la canción carga se muestra un spinner en la tarjeta.
+// - Las canciones se guardan en caché automáticamente al añadirlas y se quitan
+//   de la caché al borrarlas; se muestra "guardando en caché…" mientras se baja.
+// - 🔁 por canción: repetir esa canción. ↻ por categoría: suena toda la categoría
+//   en bucle (lista de reproducción).
 
 const API = ""; // relativo: el panel se sirve desde el mismo túnel que el bridge
 
@@ -42,17 +45,25 @@ export default function App() {
   const [vinculando, setVinculando] = useState(false);
   const [cargandoId, setCargandoId] = useState(null); // id de la canción en proceso
   const [mostrarForm, setMostrarForm] = useState(false);
-  const [nueva, setNueva] = useState({ nombre: "", icono: "", url: "", loop: false });
+  const [nueva, setNueva] = useState({ nombre: "", icono: "", url: "", categoria: "" });
   const [crossfade, setCrossfade] = useState(() => localStorage.getItem("djgambit_crossfade") === "1");
-  const [cacheandoId, setCacheandoId] = useState(null); // id de la canción bajándose a caché
+  const [loops, setLoops] = useState(() => JSON.parse(localStorage.getItem("djgambit_loops") || "{}")); // id -> bool
+  const [cats, setCats] = useState(() => JSON.parse(localStorage.getItem("djgambit_cats") || "{}")); // categoria -> bool (playlist)
 
-  const recargar = useCallback(async () => {
+  const ultimoJson = useRef("");
+
+  const sincronizar = useCallback(async () => {
     if (!token) return;
     const f = api(token);
     try {
       const [menu, est] = await Promise.all([f("/api/djgambit/menu"), f("/api/djgambit/estado")]);
-      setCanciones(menu.canciones ?? []);
-      setSonando(est.sonando ? { id: est.cancionId, nombre: est.nombre } : null);
+      const canc = menu.canciones ?? [];
+      const sig = JSON.stringify({ canc, sonando: est.sonando ? { id: est.cancionId, nombre: est.nombre } : null });
+      if (sig !== ultimoJson.current) {
+        ultimoJson.current = sig;
+        setCanciones(canc);
+        setSonando(est.sonando ? { id: est.cancionId, nombre: est.nombre } : null);
+      }
     } catch (e) {
       if (/vinculado/i.test(e.message)) {
         localStorage.removeItem("djgambit_token");
@@ -77,9 +88,16 @@ export default function App() {
       OBR.action.setWidth(640);
       OBR.action.setHeight(420);
       setEstado(token ? ESTADOS.LISTO : ESTADOS.NO_VINCULADO);
-      if (token) recargar();
+      if (token) sincronizar();
     });
-  }, [token, recargar]);
+  }, [token, sincronizar]);
+
+  // Refresco periódico leve: actualiza el estado de caché (guardando → hecho) y sonando.
+  useEffect(() => {
+    if (estado !== ESTADOS.LISTO || !token) return;
+    const id = setInterval(() => sincronizar(), 4000);
+    return () => clearInterval(id);
+  }, [estado, token, sincronizar]);
 
   async function vincular() {
     setVinculando(true);
@@ -93,7 +111,7 @@ export default function App() {
       setToken(datos.token);
       setGuildName(datos.guildName ?? "");
       setEstado(ESTADOS.LISTO);
-      await recargar();
+      await sincronizar();
     } catch (e) {
       setError(e.message);
     } finally {
@@ -107,14 +125,21 @@ export default function App() {
     setEstado(ESTADOS.NO_VINCULADO);
   }
 
-  async function reproducir(id, nombre) {
+  async function reproducir(id, nombre, categoria) {
     setCargandoId(id);
     setError("");
     setMensaje("");
     try {
-      await api(token)("/api/djgambit/play", { method: "POST", body: JSON.stringify({ id, crossfade }) });
+      const catLoop = categoria ? !!cats[categoria] : false;
+      const body = { id, crossfade };
+      if (catLoop) {
+        body.loopCategoria = true; // suena toda la categoría en bucle desde esta canción
+      } else {
+        body.loop = !!loops[id]; // repetir esta canción
+      }
+      await api(token)("/api/djgambit/play", { method: "POST", body: JSON.stringify(body) });
       setSonando({ id, nombre });
-      setMensaje(`✓ Sonando: ${nombre}`);
+      setMensaje(`✓ Sonando: ${nombre}${catLoop ? ` · ${categoria} ↻` : loops[id] ? " · 🔁" : ""}`);
     } catch (e) {
       setError(e.message);
     } finally {
@@ -129,18 +154,20 @@ export default function App() {
     });
   }
 
-  async function descargar(id, nombre) {
-    setCacheandoId(id);
-    setError("");
-    setMensaje("");
-    try {
-      const datos = await api(token)("/api/djgambit/precache", { method: "POST", body: JSON.stringify({ id }) });
-      setMensaje(datos.yaExistia ? `✓ ${nombre} ya estaba en caché` : `⬇ ${nombre} guardada en caché`);
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setCacheandoId(null);
-    }
+  function alternarLoopCancion(id) {
+    setLoops((prev) => {
+      const nuevo = { ...prev, [id]: !prev[id] };
+      localStorage.setItem("djgambit_loops", JSON.stringify(nuevo));
+      return nuevo;
+    });
+  }
+
+  function alternarLoopCategoria(cat) {
+    setCats((prev) => {
+      const nuevo = { ...prev, [cat]: !prev[cat] };
+      localStorage.setItem("djgambit_cats", JSON.stringify(nuevo));
+      return nuevo;
+    });
   }
 
   async function parar() {
@@ -167,9 +194,9 @@ export default function App() {
     }
     try {
       await api(token)("/api/djgambit/menu", { method: "POST", body: JSON.stringify(nueva) });
-      setNueva({ nombre: "", icono: "", url: "", loop: false });
+      setNueva({ nombre: "", icono: "", url: "", categoria: "" });
       setMostrarForm(false);
-      await recargar();
+      await sincronizar();
     } catch (e) {
       setError(e.message);
     }
@@ -179,9 +206,26 @@ export default function App() {
     setError("");
     setMensaje("");
     await api(token)(`/api/djgambit/menu/${id}`, { method: "DELETE" }).catch((e) => setError(e.message));
-    await recargar();
+    await sincronizar();
     if (sonando?.id === id) setSonando(null);
   }
+
+  // Agrupar canciones por categoría, conservando el orden de inserción.
+  const grupos = useMemo(() => {
+    const orden = [];
+    const mapa = new Map();
+    for (const c of canciones) {
+      const cat = c.categoria || "Sin categoría";
+      if (!mapa.has(cat)) {
+        mapa.set(cat, []);
+        orden.push(cat);
+      }
+      mapa.get(cat).push(c);
+    }
+    return orden.map((cat) => ({ cat, items: mapa.get(cat) }));
+  }, [canciones]);
+
+  const cacheEnCurso = canciones.filter((c) => c.cacheando);
 
   const esSonando = (c) => sonando?.id === c.id;
 
@@ -233,49 +277,77 @@ export default function App() {
       </div>
 
       <div className="mensajes">
+        {cacheEnCurso.length > 0 && (
+          <span className="ok cache-aviso"><span className="spinner spinner-mini" /> Guardando en caché: {cacheEnCurso.map((c) => c.nombre).join(", ")}…</span>
+        )}
         {mensaje && <span className="ok">{mensaje}</span>}
         {error && <span className="error">❌ {error}</span>}
       </div>
 
       <div className="escenario">
-        {canciones.map((c) => (
-          <div key={c.id} className={`escena ${cargandoId === c.id ? "escena-cargando" : ""} ${esSonando(c) ? "escena-sonando" : ""}`}>
-            <button
-              className="escena-btn"
-              onClick={() => reproducir(c.id, c.nombre)}
-              disabled={cargandoId !== null && cargandoId !== c.id}
-              title={`${c.url}${c.loop ? " 🔁" : ""}`}
-            >
-              {cargandoId === c.id ? (
-                <span className="spinner" />
-              ) : (
-                <span className="icono">{c.icono || "🎵"}</span>
-              )}
-              <span className="escena-fila">
-                <span className="nombre">{c.nombre}</span>
-                <span className="badge">{c.loop ? "🔁" : ""}{esSonando(c) ? "▶" : ""}</span>
-              </span>
-            </button>
-            <button className="basura" onClick={() => borrar(c.id)} title="Quitar del menú">🗑</button>
-            <button
-              className="descarga"
-              onClick={() => descargar(c.id, c.nombre)}
-              disabled={cacheandoId !== null && cacheandoId !== c.id}
-              title="Descargar a caché (para que suene al instante)"
-            >
-              {cacheandoId === c.id ? <span className="spinner spinner-pequeno" /> : "⬇"}
-            </button>
-          </div>
-        ))}
+        {grupos.map((g) => {
+          const catLoop = !!cats[g.cat];
+          return (
+            <div className="cat" key={g.cat}>
+              <div className="cat-cab">
+                <span className="cat-nombre">▸ {g.cat}</span>
+                <label
+                  className={`toggle toggle-cat ${catLoop ? "activa" : ""}`}
+                  title={catLoop ? "Playlist de esta categoría activa (bucle)" : "Reproducir toda la categoría en bucle (playlist)"}
+                >
+                  <input type="checkbox" checked={catLoop} onChange={() => alternarLoopCategoria(g.cat)} />
+                  <span className="cat-loop-ico">↻</span>
+                </label>
+              </div>
+              <div className="cat-fila">
+                {g.items.map((c) => {
+                  const loop = !!loops[c.id];
+                  return (
+                    <div key={c.id} className={`escena ${cargandoId === c.id ? "escena-cargando" : ""} ${esSonando(c) ? "escena-sonando" : ""}`}>
+                      <button
+                        className="escena-btn"
+                        onClick={() => reproducir(c.id, c.nombre, c.categoria)}
+                        disabled={cargandoId !== null && cargandoId !== c.id}
+                        title={`${c.url}${loop ? "\n🔁 Repetir" : ""}`}
+                      >
+                        {cargandoId === c.id ? (
+                          <span className="spinner" />
+                        ) : (
+                          <span className="icono">{c.icono || "🎵"}</span>
+                        )}
+                        {c.cacheado && !c.cacheando && <span className="cache-hecho" title="En caché">✓</span>}
+                        {c.cacheando && (
+                          <span className="cache-hecho" title="Guardando en caché…">
+                            <span className="spinner spinner-mini" />
+                          </span>
+                        )}
+                        <span className="escena-fila">
+                          <span className="nombre">{c.nombre}</span>
+                          <span className="badge">{esSonando(c) ? "▶" : ""}</span>
+                        </span>
+                      </button>
+                      <button
+                        className={`loop-btn ${loop ? "activo" : ""}`}
+                        onClick={() => alternarLoopCancion(c.id)}
+                        title={loop ? "Apagar bucle de esta canción" : "Repetir esta canción (bucle)"}
+                      >
+                        🔁
+                      </button>
+                      <button className="basura" onClick={() => borrar(c.id)} title="Quitar del menú">🗑</button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
 
         {mostrarForm ? (
           <div className="form">
             <input className="input" value={nueva.icono} onChange={(e) => setNueva({ ...nueva, icono: e.target.value })} placeholder="Icono (emoji)" maxLength={8} />
             <input className="input" value={nueva.nombre} onChange={(e) => setNueva({ ...nueva, nombre: e.target.value })} placeholder="Nombre" />
             <input className="input" value={nueva.url} onChange={(e) => setNueva({ ...nueva, url: e.target.value })} placeholder="URL de YouTube" />
-            <label className="aviso">
-              <input type="checkbox" checked={nueva.loop} onChange={(e) => setNueva({ ...nueva, loop: e.target.checked })} /> Bucle 🔁
-            </label>
+            <input className="input" value={nueva.categoria} onChange={(e) => setNueva({ ...nueva, categoria: e.target.value })} placeholder="Categoría (opcional)" />
             <div className="fila">
               <button className="boton boton-primario" onClick={guardar}>💾 Guardar</button>
               <button className="boton" onClick={() => setMostrarForm(false)}>Cancelar</button>

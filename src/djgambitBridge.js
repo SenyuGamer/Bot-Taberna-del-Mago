@@ -10,18 +10,22 @@ import {
   listarCancionesMenu,
   setGuildPorToken,
 } from "./db.js";
-import {
-  reproducirCancionMenu,
-  pararCancionMenu,
-  estadoCancionMenu,
-  getSesion,
-  unir,
-  canalGuardado,
-} from "./voice/sessionManager.js";
-import { precargarCache } from "./voice/pipeline.js";
+import { reproducirCancionMenu, reproducirPlaylistCategoria, pararCancionMenu, estadoCancionMenu, getSesion, unir, canalGuardado } from "./voice/sessionManager.js";
+import { precargarCache, existeCache, borrarCache } from "./voice/pipeline.js";
 
 // Precargas en curso por URL (evita descargar la misma canciÃ³n dos veces a la vez).
 const precargas = new Map(); // url -> Promise
+
+/** Lanza la descarga a cachÃ© de una URL (reutilizando la que ya estÃ© en curso). */
+export function _asegurarPrecarga(url) {
+  let promesa = precargas.get(url);
+  if (!promesa) {
+    promesa = precargarCache({ url });
+    promesa.finally(() => precargas.delete(url)).catch(() => {});
+    precargas.set(url, promesa);
+  }
+  return promesa;
+}
 
 // Puente HTTP DJGambit â†’ Discord.
 // - El panel (navegador del DM dentro de Owlbear) se vincula con un cÃ³digo de
@@ -119,7 +123,7 @@ function guildDeToken(req) {
  * Reprocha una canciÃ³n del menÃº en el guild vinculado. Si el bot no estÃ¡ en el
  * canal de voz, intenta unirse al que haya guardado (/musica unir anterior).
  */
-async function reproducirConSesion(req, res, guildId, cancion, crossfadeMs = 0) {
+async function reproducirConSesion(req, res, guildId, cancion, crossfadeMs = 0, loop = false, loopCategoria = false) {
   let sesion = getSesion(guildId);
   let canalId = sesion?.canalId ?? canalGuardado(guildId);
 
@@ -143,13 +147,24 @@ async function reproducirConSesion(req, res, guildId, cancion, crossfadeMs = 0) 
   }
 
   try {
-    const creado = reproducirCancionMenu(guildId, {
-      id: cancion.id,
-      url: cancion.url,
-      nombre: cancion.nombre,
-      loop: cancion.loop,
-      crossfadeMs,
-    });
+    let creado;
+    if (cancion.categoria && loopCategoria) {
+      // Modo lista de reproducción: suena toda la categoría en bucle empezando por esa canción.
+      const canciones = listarCancionesMenu().filter((c) => c.categoria === cancion.categoria);
+      creado = reproducirPlaylistCategoria(guildId, {
+        categoria: cancion.categoria,
+        canciones,
+        inicioId: cancion.id,
+      });
+    } else {
+      creado = reproducirCancionMenu(guildId, {
+        id: cancion.id,
+        url: cancion.url,
+        nombre: cancion.nombre,
+        loop,
+        crossfadeMs,
+      });
+    }
     if (!creado) return res.status(409).json({ ok: false, error: "No hay sesiÃ³n de voz activa." });
     await creado.promesa;
     res.json({ ok: true, cancion: { id: cancion.id, nombre: cancion.nombre, url: cancion.url } });
@@ -198,26 +213,40 @@ export function crearAppDjgambit() {
   // ---------- MenÃº global de canciones ----------
 
   app.get("/api/djgambit/menu", (_req, res) => {
-    res.json({ ok: true, canciones: listarCancionesMenu() });
+    const canciones = listarCancionesMenu().map((c) => ({
+      ...c,
+      cacheado: existeCache({ url: c.url }),
+      cacheando: precargas.has(c.url),
+    }));
+    res.json({ ok: true, canciones });
   });
 
   app.post("/api/djgambit/menu", (req, res) => {
     if (!guildDeToken(req)) return res.status(401).json({ ok: false, error: "Panel no vinculado. Usa /musica vincular." });
-    const { nombre, icono = "", url = "", loop = false } = req.body ?? {};
+    const { nombre, icono = "", url = "", categoria = "" } = req.body ?? {};
     if (!nombre?.trim() || !/^https?:\/\//i.test(url)) {
       return res.status(400).json({ ok: false, error: "Nombre y URL vÃ¡lida son obligatorios." });
     }
-    const cancion = agregarCancionMenu({ nombre: nombre.trim(), icono: String(icono), url, loop: !!loop });
+    const cancion = agregarCancionMenu({ nombre: nombre.trim(), icono: String(icono), url, categoria: String(categoria) });
     console.log(`ðŸŽµ CanciÃ³n aÃ±adida al menÃº: ${cancion.nombre} <${url}>`);
-    res.json({ ok: true, cancion });
+
+    // Auto-cachÃ©: se descarga a disco en segundo plano (sin bloquear el panel).
+    _asegurarPrecarga(url).then(
+      (r) => console.log(`ðŸŽµ PrÃ©-cachÃ© automÃ¡tico lista: ${cancion.nombre}${r.yaExistia ? " (ya estaba)" : ""}`),
+      (error) => console.error(`ðŸŽµ No se pudo auto-cachÃ© ${cancion.nombre}:`, error.message)
+    );
+
+    res.json({ ok: true, cancion: { ...cancion, cacheado: existeCache({ url }), cacheando: true } });
   });
 
   app.delete("/api/djgambit/menu/:id", (req, res) => {
     if (!guildDeToken(req)) return res.status(401).json({ ok: false, error: "Panel no vinculado. Usa /musica vincular." });
     const id = Number(req.params.id);
+    const cancion = getCancionMenu(id);
     const borrada = borrarCancionMenu(id);
     if (!borrada) return res.status(404).json({ ok: false, error: "CanciÃ³n no encontrada." });
-    console.log(`ðŸŽµ CanciÃ³n ${id} quitada del menÃº.`);
+    if (cancion) borrarCache({ url: cancion.url }); // borrar tambiÃ©n la copia en cachÃ©
+    console.log(`ðŸŽµ CanciÃ³n ${id} quitada del menÃº (y de la cachÃ©).`);
     res.json({ ok: true });
   });
 
@@ -225,13 +254,13 @@ export function crearAppDjgambit() {
 
   app.post("/api/djgambit/play", (req, res) => {
     const guildId = guildDeToken(req);
-    const { id, crossfade } = req.body ?? {};
+    const { id, crossfade, loop = false, loopCategoria = false } = req.body ?? {};
     const cancion = id ? getCancionMenu(Number(id)) : null;
     if (!guildId) return res.status(401).json({ ok: false, error: "Panel no vinculado a un servidor. Usa /musica vincular." });
     if (!cancion) return res.status(404).json({ ok: false, error: "CanciÃ³n no encontrada en el menÃº." });
 
     setImmediate(() => {
-      reproducirConSesion(req, res, guildId, cancion, crossfade ? 3000 : 0);
+      reproducirConSesion(req, res, guildId, cancion, crossfade ? 3000 : 0, !!loop, !!loopCategoria);
     });
   });
 
@@ -245,28 +274,8 @@ export function crearAppDjgambit() {
   app.get("/api/djgambit/estado", (req, res) => {
     const guildId = guildDeToken(req);
     if (!guildId) return res.status(401).json({ ok: false, error: "Panel no vinculado a un servidor. Usa /musica vincular." });
-    res.json({ ok: true, ...estadoCancionMenu(guildId) });
-  });
-
-  // ---------- PrÃ©-cachÃ© (descargar a disco sin reproducir) ----------
-
-  app.post("/api/djgambit/precache", (req, res) => {
-    const guildId = guildDeToken(req);
-    const { id } = req.body ?? {};
-    const cancion = id ? getCancionMenu(Number(id)) : null;
-    if (!guildId) return res.status(401).json({ ok: false, error: "Panel no vinculado a un servidor. Usa /musica vincular." });
-    if (!cancion) return res.status(404).json({ ok: false, error: "CanciÃ³n no encontrada en el menÃº." });
-
-    const url = cancion.url;
-    let promesa = precargas.get(url);
-    if (!promesa) {
-      promesa = precargarCache({ url });
-      promesa.finally(() => precargas.delete(url)).catch(() => {});
-      precargas.set(url, promesa);
-    }
-    promesa
-      .then((r) => res.json({ ok: true, yaExistia: r.yaExistia }))
-      .catch((error) => res.status(502).json({ ok: false, error: `No pude precargar: ${error.message}` }));
+    const estado = estadoCancionMenu(guildId);
+    res.json({ ok: true, ...estado, cacheando: [...precargas.keys()] });
   });
 
   // EstÃ¡ticos del panel compilado (Owlbear carga manifest.json desde aquÃ­)
