@@ -91,12 +91,12 @@ info "npm ci --omit=dev (en $APP_DIR)"
 cd "$APP_DIR"
 npm ci --omit=dev
 
-# Stub RISC-V: @snazzah/davey no tiene binario para riscv64
-if [ -f "$APP_DIR/node_modules/@snazzah/davey/index.js" ]; then
-  info "Inyectando stub de @snazzah/davey para RISC-V..."
-  cp "$APP_DIR/scripts/davey-stub.js" "$APP_DIR/node_modules/@snazzah/davey/index.js"
-  ok "Stub de davey inyectado"
-fi
+# DAVE en RISC-V: @snazzah/davey no tiene binario nativo para riscv64, pero sí
+# build WASM (WASI). npm no lo instala solo (solo instala la plataforma actual),
+# así que lo instalamos con --force y forzamos su carga con NAPI_RS_FORCE_WASI.
+info "Instalando @snazzah/davey-wasm32-wasi (DAVE via WASM para RISC-V)..."
+npm install @snazzah/davey-wasm32-wasi@0.1.12 --no-save --force
+ok "davey WASM listo (NAPI_RS_FORCE_WASI se define en el servicio)"
 
 # ---------- 4. Configuración (.env) ----------
 

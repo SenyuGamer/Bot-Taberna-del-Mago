@@ -9,6 +9,7 @@ import {
 import { PermissionsBitField } from "discord.js";
 import { Mixer, clampVolumen } from "./mixer.js";
 import { crearPipeline } from "./pipeline.js";
+import { crearEncoderOpus } from "./encoderOpus.js";
 import { setCanalDjinni, getCanalDjinni } from "../db.js";
 
 // Gestiona las sesiones de voz: una conexión por servidor (guild).
@@ -47,12 +48,15 @@ export async function unir(guild, canal, clientId) {
     adapterCreator: guild.voiceAdapterCreator,
     selfDeaf: false,
     selfMute: false,
-    daveEncryption: false, // RISC-V: sin binario nativo de davey, usamos cifrado clásico
+    daveEncryption: true, // Discord exige DAVE (close 4017). En RISC-V se usa el build WASM de davey.
   });
 
   const player = createAudioPlayer();
   const mixer = new Mixer();
-  const recurso = createAudioResource(mixer.salida, { inputType: StreamType.Raw });
+  // Encodemos el PCM mezclado a ogg/opus con ffmpeg (RISC-V: opusscript crashea).
+  const ffEnc = crearEncoderOpus({ onError: (e) => console.error(`🎵 ${e.message}`) });
+  mixer.salida.pipe(ffEnc.stdin);
+  const recurso = createAudioResource(ffEnc.stdout, { inputType: StreamType.OggOpus });
   player.play(recurso);
   connection.subscribe(player);
 

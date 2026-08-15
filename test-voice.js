@@ -7,6 +7,7 @@ import {
   entersState,
   VoiceConnectionStatus,
 } from "@discordjs/voice";
+import { spawn } from "node:child_process";
 import { Mixer } from "./src/voice/mixer.js";
 import { crearPipeline } from "./src/voice/pipeline.js";
 
@@ -36,7 +37,7 @@ client.once("clientReady", async () => {
     adapterCreator: guild.voiceAdapterCreator,
     selfDeaf: false,
     selfMute: false,
-    daveEncryption: false,
+    debug: true,
   });
 
   connection.on("stateChange", (v, n) => {
@@ -56,7 +57,18 @@ client.once("clientReady", async () => {
 
   const player = createAudioPlayer();
   const mixer = new Mixer();
-  const recurso = createAudioResource(mixer.salida, { inputType: StreamType.Raw });
+  // RISC-V: opusscript (wasm 2019) no funciona en Node 22; encodemos a opus con
+  // ffmpeg del sistema (ogg/opus), que @discordjs/voice solo demuxa (sin opusscript).
+  const ffEnc = spawn("ffmpeg", [
+    "-hide_banner", "-loglevel", "error",
+    "-f", "s16le", "-ar", "48000", "-ac", "2", "-i", "pipe:0",
+    "-c:a", "libopus", "-page_duration", "20",
+    "-f", "ogg", "pipe:1",
+  ], { stdio: ["pipe", "pipe", "pipe"] });
+  ffEnc.stdin.on("error", () => {});
+  ffEnc.stderr.on("data", (d) => console.error("  ffmpeg-enc:", d.toString().trim()));
+  mixer.salida.pipe(ffEnc.stdin);
+  const recurso = createAudioResource(ffEnc.stdout, { inputType: StreamType.OggOpus });
   player.play(recurso);
   connection.subscribe(player);
 

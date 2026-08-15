@@ -93,12 +93,35 @@ ok ".env presente"
 info "npm ci --omit=dev"
 npm ci --omit=dev
 
-# Stub RISC-V: @snazzah/davey no tiene binario para riscv64
-if [ -f "$APP_DIR/node_modules/@snazzah/davey/index.js" ]; then
-  info "Inyectando stub de @snazzah/davey para RISC-V..."
-  cp "$APP_DIR/scripts/davey-stub.js" "$APP_DIR/node_modules/@snazzah/davey/index.js"
-  ok "Stub de davey inyectado"
-fi
+# DAVE en RISC-V: @snazzah/davey no tiene binario nativo para riscv64, pero sí
+# build WASM (WASI). npm no lo instala solo (solo instala la plataforma actual),
+# así que lo instalamos con --force y forzamos su carga con NAPI_RS_FORCE_WASI.
+info "Instalando @snazzah/davey-wasm32-wasi (DAVE via WASM para RISC-V)..."
+npm install @snazzah/davey-wasm32-wasi@0.1.12 --no-save --force
+ok "davey WASM listo (NAPI_RS_FORCE_WASI se define en el servicio)"
+
+# Fix conocido: Discord exige la URL del WebSocket de voz con "/" final, o la
+# conexión se cae justo tras el Hello (op 8) y nunca llega a Ready.
+# Ver https://github.com/discordjs/discord.js/pull/11440 (arreglado en 0.20+).
+VOICE_DIST_DIR="$APP_DIR/node_modules/@discordjs/voice/dist"
+for VOICE_DIST in "$VOICE_DIST_DIR/index.js" "$VOICE_DIST_DIR/index.mjs"; do
+  if [ -f "$VOICE_DIST" ]; then
+    if grep -qF '${endpoint}/?v=8' "$VOICE_DIST"; then
+      info "Patch de voz ya aplicado en $(basename "$VOICE_DIST") (slash final)."
+    else
+      info "Aplicando patch de @discordjs/voice en $(basename "$VOICE_DIST") (slash final en la URL del WebSocket)..."
+      sed -i 's#wss://${endpoint}?v=8#wss://${endpoint}/?v=8#' "$VOICE_DIST"
+      grep -qF '${endpoint}/?v=8' "$VOICE_DIST" && ok "Patch de voz aplicado en $(basename "$VOICE_DIST")" || error "El patch de voz NO se pudo aplicar en $(basename "$VOICE_DIST")"
+    fi
+  fi
+done
+
+# Sección de servicios: se copia al directorio systemd si cambió (npm ci borró .git, pero
+# el service se lee de /etc/systemd/system; lo mantenemos al día aquí)
+info "Instalando $SERVICE actualizado en systemd..."
+cp "$APP_DIR/$SERVICE" "/etc/systemd/system/$SERVICE"
+systemctl daemon-reload
+ok "$SERVICE actualizado en systemd"
 
 # ---------- 4. Comandos de Discord (solo si cambiaron) ----------
 

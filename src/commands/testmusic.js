@@ -10,6 +10,7 @@ import {
 } from "@discordjs/voice";
 import { Mixer } from "../voice/mixer.js";
 import { crearPipeline } from "../voice/pipeline.js";
+import { crearEncoderOpus } from "../voice/encoderOpus.js";
 import { embed, embedError } from "../utils.js";
 
 const COLOR = 0x1db954;
@@ -67,6 +68,7 @@ export const testmusic = {
       channelId: canal.id,
       guildId: canal.guild.id,
       adapterCreator: canal.guild.voiceAdapterCreator,
+      debug: true,
     });
 
     connection.on("stateChange", (_v, n) => {
@@ -91,7 +93,10 @@ export const testmusic = {
 
     const player = createAudioPlayer({ behaviors: { noSubscriber: NoSubscriberBehavior.Play } });
     const mixer = new Mixer();
-    const recurso = createAudioResource(mixer.salida, { inputType: StreamType.Raw });
+    // RISC-V: opusscript (wasm 2019) crashea en Node 22; encodemos con ffmpeg a ogg/opus.
+    const ffEnc = crearEncoderOpus({ onError: (e) => console.error("testmusic ffmpeg-opus:", e.message) });
+    mixer.salida.pipe(ffEnc.stdin);
+    const recurso = createAudioResource(ffEnc.stdout, { inputType: StreamType.OggOpus });
     player.play(recurso);
     connection.subscribe(player);
     player.on("error", (e) => console.error("testmusic player error:", e.message));
