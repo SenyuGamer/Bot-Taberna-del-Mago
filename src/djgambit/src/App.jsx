@@ -283,6 +283,7 @@ export default function App() {
       <div className="cab">
         <span className="titulo">🧞 Menú musical{guildName ? ` · ${guildName}` : ""}</span>
         <div className="cab-right">
+          <div className="beta-badge" title="Versión experimental del panel — puede haber errores">BETA</div>
           <button className="boton boton-chico" onClick={cachearTodas} title="Descargar todas las canciones a caché" disabled={cargandoId !== null}>⬇</button>
           <div className="crossfade-control" title="Crossfade al cambiar de canción (segundos)">
             <span>🔀</span>
