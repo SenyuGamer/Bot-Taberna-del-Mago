@@ -29,6 +29,26 @@
   justify-content: space-between;
 }
 
+.cab-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  cursor: pointer;
+  opacity: 0.9;
+  user-select: none;
+}
+
+.toggle input[type="checkbox"] {
+  accent-color: rgb(129, 77, 222);
+  cursor: pointer;
+}
+
 .titulo {
   font-size: 15px;
   font-weight: 700;
@@ -207,6 +227,24 @@
 }
 
 .escena:hover .basura { opacity: 1; }
+
+/* Descargar a caché (botón pequeño arriba a la izquierda de la tarjeta) */
+.descarga {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  border: 0;
+  background: rgba(0, 0, 0, 0.45);
+  border-radius: 8px;
+  font-size: 11px;
+  padding: 2px 4px;
+  cursor: pointer;
+  opacity: 0.85;
+  transition: opacity 100ms linear;
+}
+
+.descarga:hover { opacity: 1; }
+.descarga:disabled { opacity: 0.35; cursor: default; }
 
 /* Formulario de añadir */
 .form {

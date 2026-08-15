@@ -200,3 +200,59 @@ export function crearPipeline({ url, loop = false, loopDelayMs, onDatos, onFin, 
     estaVivo: () => !detenido,
   };
 }
+
+/**
+ * Descarga SOLO a la caché (sin reproducir) para que la reproducción posterior
+ * arranque rápido. Devuelve una promesa con { yaExistia }. Idempotente por URL.
+ * @param {{url: string, cacheDir?: string, rutas?: {yt?: string}}} opts
+ */
+export function precargarCache({ url, cacheDir = CACHE_DIR, rutas = {} }) {
+  const cmdYt = rutas.yt ?? YTDLP;
+  if (!/^https?:\/\//i.test(url)) return Promise.reject(new Error("Solo se puede precargar una URL HTTP."));
+
+  const archivo = join(cacheDir, `${createHash("sha256").update(url).digest("hex")}.weba`);
+  if (existsSync(archivo)) return Promise.resolve({ yaExistia: true });
+
+  return new Promise((resolve, reject) => {
+    try { mkdirSync(cacheDir, { recursive: true }); } catch {}
+    let yt;
+    try {
+      yt = spawn(cmdYt, [
+        "--no-playlist", "--no-progress",
+        "--js-runtimes", `node:${process.execPath}`,
+        "--extractor-args", "youtube:player_client=android,ios,web,tv",
+        "--retries", "3", "--fragment-retries", "3",
+        "-f", "bestaudio/best", "-o", "-", url,
+      ], { stdio: ["ignore", "pipe", "pipe"] });
+    } catch (error) {
+      return reject(new Error(`No se pudo lanzar yt-dlp: ${error.message}`));
+    }
+
+    const escritor = createWriteStream(`${archivo}.part`);
+    yt.stdout.pipe(escritor);
+    let errores = "";
+    yt.stderr.on("data", (d) => { if (errores.length < 2000) errores += d.toString(); });
+    yt.on("error", (error) => {
+      try { escritor.destroy(); } catch {}
+      try { rmSync(`${archivo}.part`, { force: true }); } catch {}
+      reject(new Error(`yt-dlp no disponible: ${error.message}`));
+    });
+    yt.on("close", (code) => {
+      escritor.end(() => {
+        if (code === 0) {
+          try {
+            renameSync(`${archivo}.part`, archivo);
+            console.log(`🎵 Pré-caché: <${url}> guardada en disco.`);
+            resolve({ yaExistia: false });
+          } catch (error) {
+            try { rmSync(`${archivo}.part`, { force: true }); } catch {}
+            reject(error);
+          }
+        } else {
+          try { rmSync(`${archivo}.part`, { force: true }); } catch {}
+          reject(new Error(`yt-dlp falló (código ${code}): ${errores.trim().slice(-250) || "URL no soportada"}`));
+        }
+      });
+    });
+  });
+}

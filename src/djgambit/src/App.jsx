@@ -43,6 +43,8 @@ export default function App() {
   const [cargandoId, setCargandoId] = useState(null); // id de la canción en proceso
   const [mostrarForm, setMostrarForm] = useState(false);
   const [nueva, setNueva] = useState({ nombre: "", icono: "", url: "", loop: false });
+  const [crossfade, setCrossfade] = useState(() => localStorage.getItem("djgambit_crossfade") === "1");
+  const [cacheandoId, setCacheandoId] = useState(null); // id de la canción bajándose a caché
 
   const recargar = useCallback(async () => {
     if (!token) return;
@@ -110,13 +112,34 @@ export default function App() {
     setError("");
     setMensaje("");
     try {
-      await api(token)("/api/djgambit/play", { method: "POST", body: JSON.stringify({ id }) });
+      await api(token)("/api/djgambit/play", { method: "POST", body: JSON.stringify({ id, crossfade }) });
       setSonando({ id, nombre });
       setMensaje(`✓ Sonando: ${nombre}`);
     } catch (e) {
       setError(e.message);
     } finally {
       setCargandoId(null);
+    }
+  }
+
+  function alternarCrossfade() {
+    setCrossfade((v) => {
+      localStorage.setItem("djgambit_crossfade", v ? "0" : "1");
+      return !v;
+    });
+  }
+
+  async function descargar(id, nombre) {
+    setCacheandoId(id);
+    setError("");
+    setMensaje("");
+    try {
+      const datos = await api(token)("/api/djgambit/precache", { method: "POST", body: JSON.stringify({ id }) });
+      setMensaje(datos.yaExistia ? `✓ ${nombre} ya estaba en caché` : `⬇ ${nombre} guardada en caché`);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setCacheandoId(null);
     }
   }
 
@@ -201,7 +224,12 @@ export default function App() {
     <div className="app">
       <div className="cab">
         <span className="titulo">🧞 Menú musical{guildName ? ` · ${guildName}` : ""}</span>
-        <button className="boton boton-chico" onClick={desvincular} title="Desvincular este panel">⏻</button>
+        <div className="cab-right">
+          <label className="toggle" title="Fundir la canción anterior en la nueva al cambiar">
+            <input type="checkbox" checked={crossfade} onChange={alternarCrossfade} /> 🔀
+          </label>
+          <button className="boton boton-chico" onClick={desvincular} title="Desvincular este panel">⏻</button>
+        </div>
       </div>
 
       <div className="mensajes">
@@ -229,6 +257,14 @@ export default function App() {
               </span>
             </button>
             <button className="basura" onClick={() => borrar(c.id)} title="Quitar del menú">🗑</button>
+            <button
+              className="descarga"
+              onClick={() => descargar(c.id, c.nombre)}
+              disabled={cacheandoId !== null && cacheandoId !== c.id}
+              title="Descargar a caché (para que suene al instante)"
+            >
+              {cacheandoId === c.id ? <span className="spinner spinner-pequeno" /> : "⬇"}
+            </button>
           </div>
         ))}
 

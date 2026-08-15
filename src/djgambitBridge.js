@@ -18,6 +18,10 @@ import {
   unir,
   canalGuardado,
 } from "./voice/sessionManager.js";
+import { precargarCache } from "./voice/pipeline.js";
+
+// Precargas en curso por URL (evita descargar la misma canciÃ³n dos veces a la vez).
+const precargas = new Map(); // url -> Promise
 
 // Puente HTTP DJGambit â†’ Discord.
 // - El panel (navegador del DM dentro de Owlbear) se vincula con un cÃ³digo de
@@ -115,7 +119,7 @@ function guildDeToken(req) {
  * Reprocha una canciÃ³n del menÃº en el guild vinculado. Si el bot no estÃ¡ en el
  * canal de voz, intenta unirse al que haya guardado (/musica unir anterior).
  */
-async function reproducirConSesion(req, res, guildId, cancion) {
+async function reproducirConSesion(req, res, guildId, cancion, crossfadeMs = 0) {
   let sesion = getSesion(guildId);
   let canalId = sesion?.canalId ?? canalGuardado(guildId);
 
@@ -144,6 +148,7 @@ async function reproducirConSesion(req, res, guildId, cancion) {
       url: cancion.url,
       nombre: cancion.nombre,
       loop: cancion.loop,
+      crossfadeMs,
     });
     if (!creado) return res.status(409).json({ ok: false, error: "No hay sesiÃ³n de voz activa." });
     await creado.promesa;
@@ -220,13 +225,13 @@ export function crearAppDjgambit() {
 
   app.post("/api/djgambit/play", (req, res) => {
     const guildId = guildDeToken(req);
-    const { id } = req.body ?? {};
+    const { id, crossfade } = req.body ?? {};
     const cancion = id ? getCancionMenu(Number(id)) : null;
     if (!guildId) return res.status(401).json({ ok: false, error: "Panel no vinculado a un servidor. Usa /musica vincular." });
     if (!cancion) return res.status(404).json({ ok: false, error: "CanciÃ³n no encontrada en el menÃº." });
 
     setImmediate(() => {
-      reproducirConSesion(req, res, guildId, cancion);
+      reproducirConSesion(req, res, guildId, cancion, crossfade ? 3000 : 0);
     });
   });
 
@@ -241,6 +246,27 @@ export function crearAppDjgambit() {
     const guildId = guildDeToken(req);
     if (!guildId) return res.status(401).json({ ok: false, error: "Panel no vinculado a un servidor. Usa /musica vincular." });
     res.json({ ok: true, ...estadoCancionMenu(guildId) });
+  });
+
+  // ---------- PrÃ©-cachÃ© (descargar a disco sin reproducir) ----------
+
+  app.post("/api/djgambit/precache", (req, res) => {
+    const guildId = guildDeToken(req);
+    const { id } = req.body ?? {};
+    const cancion = id ? getCancionMenu(Number(id)) : null;
+    if (!guildId) return res.status(401).json({ ok: false, error: "Panel no vinculado a un servidor. Usa /musica vincular." });
+    if (!cancion) return res.status(404).json({ ok: false, error: "CanciÃ³n no encontrada en el menÃº." });
+
+    const url = cancion.url;
+    let promesa = precargas.get(url);
+    if (!promesa) {
+      promesa = precargarCache({ url });
+      promesa.finally(() => precargas.delete(url)).catch(() => {});
+      precargas.set(url, promesa);
+    }
+    promesa
+      .then((r) => res.json({ ok: true, yaExistia: r.yaExistia }))
+      .catch((error) => res.status(502).json({ ok: false, error: `No pude precargar: ${error.message}` }));
   });
 
   // EstÃ¡ticos del panel compilado (Owlbear carga manifest.json desde aquÃ­)

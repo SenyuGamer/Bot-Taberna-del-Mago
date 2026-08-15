@@ -82,6 +82,7 @@ export async function unir(guild, canal, clientId) {
     recurso,
     fuentes: new Map(), // id -> {id, url, tipo, loop, volumen, userId, pipeline}
     temporizadorVacio: null,
+    crossfadeTimer: null,
   };
   sesiones.set(guild.id, sesion);
   setCanalDjgambit(guild.id, canal.id);
@@ -99,6 +100,7 @@ export async function unir(guild, canal, clientId) {
 export function parar(guildId) {
   const s = sesiones.get(guildId);
   if (!s) return false;
+  if (s.crossfadeTimer) { clearInterval(s.crossfadeTimer); s.crossfadeTimer = null; }
   for (const id of s.fuentes.keys()) _quitarFuenteDeSesion(s, id);
   clearTimeout(s.temporizadorVacio);
   s.mixer.detener();
@@ -183,37 +185,98 @@ export function quitarFuentesManuales(guildId, { soloDe = null } = {}) {
  * Reproduce una canción del menú en la sesión. Devuelve null si no hay sesión,
  * o { promesa } (resuelve al primer audio, rechaza con el error).
  */
-export function reproducirCancionMenu(guildId, { id = null, url, nombre = "", loop = false }) {
+const PASOS_CROSSFADE = 20;
+
+export function reproducirCancionMenu(guildId, { id = null, url, nombre = "", loop = false, crossfadeMs = 0 }) {
   const s = sesiones.get(guildId);
   if (!s) return null;
 
+  // Durante la transición la "activa" sigue siendo la vieja; la nueva entra como "menu:transicion".
+  if (s.fuentes.has("menu:transicion")) {
+    _quitarFuenteDeSesion(s, "menu:transicion");
+    if (s.crossfadeTimer) { clearInterval(s.crossfadeTimer); s.crossfadeTimer = null; }
+  }
+
+  const activa = s.fuentes.get("menu:activa");
+
   // El menú reproduce una canción a la vez (id estable "menu:activa").
-  const fuenteId = "menu:activa";
-  return agregarFuente(guildId, {
-    id: fuenteId,
+  // Sin canción previa o sin crossfade: reemplazo directo.
+  if (!activa || crossfadeMs <= 0) {
+    return agregarFuente(guildId, {
+      id: "menu:activa",
+      url,
+      volumen: 1,
+      loop,
+      nombre,
+      tipo: "menu",
+      cancionId: id,
+      onError: (e) => console.error(`🎵 Canción del menú falló:`, e.message),
+    });
+  }
+
+  // Crossfade: la nueva entra con volumen 0 mientras la vieja se desvanece.
+  const creada = agregarFuente(guildId, {
+    id: "menu:transicion",
     url,
-    volumen: 1,
+    volumen: 0,
     loop,
     nombre,
     tipo: "menu",
     cancionId: id,
     onError: (e) => console.error(`🎵 Canción del menú falló:`, e.message),
   });
+  if (!creada) return null;
+
+  let paso = 0;
+  s.crossfadeTimer = setInterval(() => {
+    if (!s.fuentes.has("menu:transicion")) {
+      // La nueva falló: la vieja recupera su volumen y se cancela el desvanecido.
+      clearInterval(s.crossfadeTimer);
+      s.crossfadeTimer = null;
+      if (activa) s.mixer.setVolumen("menu:activa", 1);
+      return;
+    }
+    paso++;
+    const progreso = Math.min(1, paso / PASOS_CROSSFADE);
+    s.mixer.setVolumen("menu:transicion", progreso);
+    if (activa) s.mixer.setVolumen("menu:activa", 1 - progreso);
+    if (paso >= PASOS_CROSSFADE) {
+      clearInterval(s.crossfadeTimer);
+      s.crossfadeTimer = null;
+      if (activa) _quitarFuenteDeSesion(s, "menu:activa");
+      // La nueva pasa a ser la activa del menú.
+      const fuente = s.fuentes.get("menu:transicion");
+      if (fuente) {
+        s.fuentes.delete("menu:transicion");
+        s.fuentes.set("menu:activa", { ...fuente, id: "menu:activa", volumen: 1 });
+        s.mixer.setVolumen("menu:activa", 1);
+      }
+    }
+  }, Math.max(25, crossfadeMs / PASOS_CROSSFADE));
+  s.crossfadeTimer.unref?.();
+
+  return { promesa: creada.promesa };
 }
 
 /** Detiene la canción del menú si estaba sonando. */
 export function pararCancionMenu(guildId) {
   const s = sesiones.get(guildId);
   if (!s) return false;
-  if (!s.fuentes.has("menu:activa")) return false;
-  _quitarFuenteDeSesion(s, "menu:activa");
-  return true;
+  if (s.crossfadeTimer) { clearInterval(s.crossfadeTimer); s.crossfadeTimer = null; }
+  let quitada = false;
+  for (const id of ["menu:activa", "menu:transicion"]) {
+    if (s.fuentes.has(id)) {
+      _quitarFuenteDeSesion(s, id);
+      quitada = true;
+    }
+  }
+  return quitada;
 }
 
 /** Estado de la canción del menú en la sesión (para el panel). */
 export function estadoCancionMenu(guildId) {
   const s = sesiones.get(guildId);
-  const fuente = s?.fuentes.get("menu:activa");
+  const fuente = s?.fuentes.get("menu:transicion") ?? s?.fuentes.get("menu:activa");
   if (!fuente) return { sonando: false, url: null, nombre: null, cancionId: null };
   return { sonando: true, url: fuente.url, nombre: fuente.nombre, cancionId: fuente.cancionId ?? null };
 }
