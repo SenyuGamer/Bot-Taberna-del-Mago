@@ -278,6 +278,26 @@ export function crearAppDjgambit() {
     res.json({ ok: true, ...estado, cacheando: [...precargas.keys()] });
   });
 
+  // ---------- PrÃ©-cachÃ© de todo el menÃº (descarga en segundo plano) ----------
+
+  app.post("/api/djgambit/precache-all", (req, res) => {
+    const guildId = guildDeToken(req);
+    if (!guildId) return res.status(401).json({ ok: false, error: "Panel no vinculado a un servidor. Usa /musica vincular." });
+    const canciones = listarCancionesMenu();
+    const porCachear = canciones.filter((c) => !existeCache({ url: c.url }));
+    let enCurso = 0;
+    for (const c of porCachear) {
+      if (precargas.has(c.url)) continue;
+      _asegurarPrecarga(c.url).then(
+        (r) => console.log(`ðŸŽµ CachÃ© de <${c.nombre}>${r.yaExistia ? " (ya estaba)" : " lista"}`),
+        (error) => console.error(`ðŸŽµ No se pudo cachear <${c.nombre}>:`, error.message)
+      );
+      enCurso++;
+    }
+    console.log(`ðŸŽµ PrÃ©-cachÃ© global: ${enCurso} enlazadas (${canciones.length - porCachear.length} ya en cachÃ©).`);
+    res.json({ ok: true, total: canciones.length, enCurso, yaEnCache: canciones.length - porCachear.length });
+  });
+
   // EstÃ¡ticos del panel compilado (Owlbear carga manifest.json desde aquÃ­)
   if (existsSync(resolve(DJGAMBIT_DIR))) {
     app.use(express.static(resolve(DJGAMBIT_DIR)));

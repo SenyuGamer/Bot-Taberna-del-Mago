@@ -170,6 +170,22 @@ export default function App() {
     });
   }
 
+  async function cachearTodas() {
+    setError("");
+    setMensaje("");
+    try {
+      const d = await api(token)("/api/djgambit/precache-all", { method: "POST", body: JSON.stringify({}) });
+      setMensaje(
+        d.enCurso > 0
+          ? `⬇ Cacheando ${d.enCurso} canción(es) en segundo plano…`
+          : `✓ Ya están todas en caché (${d.yaEnCache})`
+      );
+      await sincronizar();
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
   async function parar() {
     setError("");
     setMensaje("");
@@ -269,6 +285,7 @@ export default function App() {
       <div className="cab">
         <span className="titulo">🧞 Menú musical{guildName ? ` · ${guildName}` : ""}</span>
         <div className="cab-right">
+          <button className="boton boton-chico" onClick={cachearTodas} title="Descargar todas las canciones a caché" disabled={cargandoId !== null}>⬇</button>
           <label className="toggle" title="Fundir la canción anterior en la nueva al cambiar">
             <input type="checkbox" checked={crossfade} onChange={alternarCrossfade} /> 🔀
           </label>
