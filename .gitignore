@@ -23,5 +23,5 @@ Thumbs.db
 deploy-taberna.bat
 *.local.bat
 
-# --- Build del fork de Djinni (se compila en el PC y se sube a la Pi) ---
-src/djinni/build/
+# --- Build del fork de DJGambit (se compila en el PC y se sube a la Pi) ---
+src/djgambit/build/

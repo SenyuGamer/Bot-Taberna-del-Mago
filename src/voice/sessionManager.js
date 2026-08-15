@@ -10,10 +10,10 @@ import { PermissionsBitField } from "discord.js";
 import { Mixer, clampVolumen } from "./mixer.js";
 import { crearPipeline } from "./pipeline.js";
 import { crearEncoderOpus } from "./encoderOpus.js";
-import { setCanalDjinni, getCanalDjinni } from "../db.js";
+import { setCanalDjgambit, getCanalDjgambit } from "../db.js";
 
 // Gestiona las sesiones de voz: una conexión por servidor (guild).
-// Fuentes: "djinni:*" (espejo de Djinni) y "manual:*" (de /musica url).
+// Fuentes: "djgambit:*" (espejo de DJGambit) y "manual:*" (de /musica url).
 // Multi-canal: un guild = un canal; varios guilds en paralelo, sin problema.
 
 const sesiones = new Map(); // guildId -> SesionDeVoz
@@ -84,7 +84,7 @@ export async function unir(guild, canal, clientId) {
     temporizadorVacio: null,
   };
   sesiones.set(guild.id, sesion);
-  setCanalDjinni(guild.id, canal.id);
+  setCanalDjgambit(guild.id, canal.id);
 
   try {
     await entersState(connection, VoiceConnectionStatus.Ready, 20_000);
@@ -109,7 +109,7 @@ export function parar(guildId) {
 }
 
 export function canalGuardado(guildId) {
-  return getCanalDjinni(guildId);
+  return getCanalDjgambit(guildId);
 }
 
 function _quitarFuenteDeSesion(s, id) {
@@ -132,7 +132,7 @@ export function quitarFuente(guildId, id) {
  * Añade una fuente (YouTube u otra URL que entienda yt-dlp).
  * Devuelve { promesa } — `promesa` resuelve al primer audio o rechaza con el error.
  */
-export function agregarFuente(guildId, { id, url, volumen = 1, loop = false, loopDelayMs, tipo = "djinni", userId = null, nombre = "", cancionId = null, onError }) {
+export function agregarFuente(guildId, { id, url, volumen = 1, loop = false, loopDelayMs, tipo = "djgambit", userId = null, nombre = "", cancionId = null, onError }) {
   const s = sesiones.get(guildId);
   if (!s) return null;
   if (s.fuentes.has(id)) _quitarFuenteDeSesion(s, id);

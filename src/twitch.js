@@ -4,7 +4,7 @@ import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { getConfig, addInspirations } from "./db.js";
 import { TEMA, embed, enviarRegistro } from "./utils.js";
-import { puenteListo, registrarRutaTemporal } from "./djinniBridge.js";
+import { puenteListo, registrarRutaTemporal } from "./djgambitBridge.js";
 
 // Adaptado de OwlTwitch backend: eventsub.ts + twitch-auth.ts (versión reducida
 // para un solo canal: detectar canjes de puntos de canal en el chat de Twitch).
@@ -169,7 +169,7 @@ export function iniciarFlujoOAuth({ port = Number(process.env.TWITCH_AUTH_PORT |
   let promesa;
 
   if (puenteListo()) {
-    // El bridge de Djinni ya está escuchando; usamos su ruta temporal
+    // El bridge de DJGambit ya está escuchando; usamos su ruta temporal
     const rta = registrarRutaTemporal(callbackPath, {
       timeoutMs,
       manejador: async (url) => {

@@ -209,9 +209,9 @@ Salida esperada: `Deploying Taberna del Mago...` → te pedirá la contraseña d
 
 ---
 
-## 8. Música Djinni (Owlbear → llamada de Discord)
+## 8. Música DJGambit (Owlbear → llamada de Discord)
 
-El bot puede sonar en el canal de voz lo que el DM ponga en Djinni (YouTube), además de `/musica` manual. **Dependencias del SISTEMA en la Pi (RISC-V: se instalan por apt, de npm nada):**
+El bot puede sonar en el canal de voz lo que el DM ponga en DJGambit (YouTube), además de `/musica` manual. **Dependencias del SISTEMA en la Pi (RISC-V: se instalan por apt, de npm nada):**
 
 ```bash
 sudo apt update && sudo apt install -y ffmpeg yt-dlp
@@ -222,23 +222,23 @@ sudo apt update && sudo apt install -y ffmpeg yt-dlp
 **1. `.env` de la Pi** (`/opt/taberna-mago/.env`) — añade el bloque (mismo puerto que OAuth, mismo túnel):
 
 ```bash
-DJINNI_PORT=3050
-DJINNI_SLUG=<el-mismo-slug-largo-generado-en-tu-.env-del-pc>
-DJINNI_PUBLIC_URL=https://owltwitch.cobaltcatstudios.com
+DJGAMBIT_PORT=3050
+DJGAMBIT_SLUG=<el-mismo-slug-largo-generado-en-tu-.env-del-pc>
+DJGAMBIT_PUBLIC_URL=https://owltwitch.cobaltcatstudios.com
 ```
 
 **2. Túnel de Cloudflare**: ya tienes `owltwitch.cobaltcatstudios.com → localhost:3050` (el mismo que usa el callback OAuth de Twitch). No hace falta otro subdominio.
 
-**3. Compila el fork de Djinni** (en tu PC — CRA en la Pi va lento):
+**3. Compila el fork de DJGambit** (en tu PC — CRA en la Pi va lento):
 
 ```powershell
-cd src\djinni
+cd src\djgambit
 npm ci
-# Edita src\discordSync.jsx: BRIDGE_URL = "https://owltwitch.cobaltcatstudios.com" y BRIDGE_SLUG = DJINNI_SLUG
+# Edita src\discordSync.jsx: BRIDGE_URL = "https://owltwitch.cobaltcatstudios.com" y BRIDGE_SLUG = DJGAMBIT_SLUG
 npm run build
 # Sube el build a la Pi:
-scp -r build orangepi@192.168.68.110:/tmp/djinni-build
-ssh orangepi@192.168.68.110 "sudo rm -rf /opt/taberna-mago/src/djinni/build && sudo mv /tmp/djinni-build /opt/taberna-mago/src/djinni/build && sudo chown -R orangepi:orangepi /opt/taberna-mago/src/djinni/build"
+scp -r build orangepi@192.168.68.110:/tmp/djgambit-build
+ssh orangepi@192.168.68.110 "sudo rm -rf /opt/taberna-mago/src/djgambit/build && sudo mv /tmp/djgambit-build /opt/taberna-mago/src/djgambit/build && sudo chown -R orangepi:orangepi /opt/taberna-mago/src/djgambit/build"
 ```
 
 **4. En Owlbear Rodeo**: perfil → Extensions → añade `https://owltwitch.cobaltcatstudios.com/manifest.json`.
@@ -247,9 +247,9 @@ ssh orangepi@192.168.68.110 "sudo rm -rf /opt/taberna-mago/src/djinni/build && s
 
 ```
 /musica unir      → el bot se conecta al canal donde esté el DM
-DM usa Djinni normal → suena en la llamada (cambios de pista, pausa, volúmenes)
+DM usa DJGambit normal → suena en la llamada (cambios de pista, pausa, volúmenes)
 /musica url <youtube>[loop][volumen]   → pinchar algo sin Owlbear
 /musica parar     → silencio y desconexión (si el canal se queda vacío, se retira solo a los 5 min)
 ```
 
-**Notas de diseño (v1):** fuentes = lo que entienda yt-dlp (YouTube incluido); un canal de voz por servidor (limitación de Discord); loops "aleatorios" de Djinni se aproximan con retardo aleatorio equivalente; fades personalizados y seek-sync fino quedan para v2; el endpoint usa slug+rate limit+dedup (apto para túnel público del grupo privado). Health check: `curl https://owltwitch.cobaltcatstudios.com/health`.
+**Notas de diseño (v1):** fuentes = lo que entienda yt-dlp (YouTube incluido); un canal de voz por servidor (limitación de Discord); loops "aleatorios" de DJGambit se aproximan con retardo aleatorio equivalente; fades personalizados y seek-sync fino quedan para v2; el endpoint usa slug+rate limit+dedup (apto para túnel público del grupo privado). Health check: `curl https://owltwitch.cobaltcatstudios.com/health`.

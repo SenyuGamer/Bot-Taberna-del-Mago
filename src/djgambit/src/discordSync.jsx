@@ -1,7 +1,7 @@
 // ============================================================================
 //  SINCRONIZACIÓN CON DISCORD (parche "La Taberna del Mago")
 //
-//  Envía el estado de reproducción de Djinni al bot de Discord para que suene
+//  Envía el estado de reproducción de DJGambit al bot de Discord para que suene
 //  en la llamada de voz. SOLO envía desde el navegador del GM (los jugadores
 //  no empujan nada, evitando duplicados).
 //
@@ -10,7 +10,7 @@ import OBR from "@owlbear-rodeo/sdk";
 import { useMetadataStore } from "./metadataStore";
 
 const BRIDGE_URL = "https://owltwitch.cobaltcatstudios.com"; // tu túnel (sin barra final)
-const BRIDGE_SLUG = "78d6658ada193c8d480e599c007181567830"; // el DJINNI_SLUG del .env del bot
+const BRIDGE_SLUG = "78d6658ada193c8d480e599c007181567830"; // el DJGAMBIT_SLUG del .env del bot
 // ============================================================================
 
 const ENDPOINT = `${BRIDGE_URL}/api/state/${BRIDGE_SLUG}`;
@@ -36,13 +36,13 @@ function construirPayload(state) {
 			name: stream.streamName ?? "",
 			playing: !!stream.playing,
 			streamMute: !!stream.streamMute,
-			streamVolume: (stream.streamVolume ?? 100) / 100, // Djinni usa 0-100
+			streamVolume: (stream.streamVolume ?? 100) / 100, // DJGambit usa 0-100
 			links: (stream.streamData ?? []).map((link) => ({
 				name: link.name ?? "",
 				link: link.link ?? "",
 				playing: link.playing !== false,
 				mute: !!link.mute,
-				volume: (link.volume ?? 100) / 100, // Djinni usa 0-100
+				volume: (link.volume ?? 100) / 100, // DJGambit usa 0-100
 				loop: !!link.loop,
 				loopMinSec: Number(link.loop1) || 0,
 				loopMaxSec: Number(link.loop2) || 0,

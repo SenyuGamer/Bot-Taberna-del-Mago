@@ -1,6 +1,6 @@
 {
   "name": "la-taberna-del-mago-bot",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "Bot de Discord para el servidor de rol de D&D La Taberna del Mago",
   "type": "module",
   "engines": {

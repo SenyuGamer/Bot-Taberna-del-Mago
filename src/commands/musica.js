@@ -44,7 +44,7 @@ export const musica = {
       sub
         .setName("menu")
         .setDescription("Muestra las canciones guardadas en el menú del DM")
-        .addBooleanOption((opt) => opt.setName("reproducir").setDescription("Pide al DM que reproduzca una con /djinni menu"))
+        .addBooleanOption((opt) => opt.setName("reproducir").setDescription("Pide al DM que reproduzca una con /djgambit menu"))
     )
     .addSubcommand((sub) =>
       sub
@@ -61,7 +61,7 @@ export const musica = {
       const canciones = listarCancionesMenu();
       if (canciones.length === 0) {
         return interaction.reply({
-          embeds: [embed(COLOR, `${EMOJI} El menú del DM está vacío. El DM puede añadir canciones desde el panel de Owlbear (extensión DJINNI).`)],
+          embeds: [embed(COLOR, `${EMOJI} El menú del DM está vacío. El DM puede añadir canciones desde el panel de Owlbear (extensión DJGAMBIT).`)],
         });
       }
       const lineas = canciones.map((c) => `${c.icono || "🎵"} **${c.nombre}**${c.loop ? " 🔁" : ""} — <${c.url}>`);
@@ -123,7 +123,7 @@ export const musica = {
           embed(
             COLOR,
             `${EMOJI} **Conectado a ${canal.name}**.\n` +
-            `Pon música con \`/musica url\`, elige del menú del DM desde Owlbear (\`/djinni\`), o guárdalas con el propio panel DJINNI.\n\n*Para cortar: \`/musica parar todo\`.*`,
+            `Pon música con \`/musica url\`, elige del menú del DM desde Owlbear (\`/djgambit\`), o guárdalas con el propio panel DJGAMBIT.\n\n*Para cortar: \`/musica parar todo\`.*`,
             `${EMOJI} La taberna suena`
           ),
         ],

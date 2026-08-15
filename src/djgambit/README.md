@@ -1,5 +1,5 @@
 ![Header](https://raw.githubusercontent.com/kgbergman/music-player/main/docs/header.jpg)
-# DJinni Music Player
+# DJGambit Music Player
 
 Mix sound effects and music with looping, fading, and more to provide an immersive experience!
 
@@ -11,9 +11,9 @@ Copy and add `https://music-player-adrf.onrender.com/manifest.json` to your exte
 
 ## How it Works
 
-The DJinni Music Player allows the GM to curate YouTube links and play them for their players. You can mix music, monster noises, weather sounds, swords clashing, etc. Anything you find on YouTube can be added to DJinni.
+The DJGambit Music Player allows the GM to curate YouTube links and play them for their players. You can mix music, monster noises, weather sounds, swords clashing, etc. Anything you find on YouTube can be added to DJGambit.
 
-Clicking the <img src="https://raw.githubusercontent.com/kgbergman/music-player/main/docs/djinni.png#gh-light-mode-only" width=20 alt="DJinni Icon"><img src="https://raw.githubusercontent.com/kgbergman/music-player/main/docs/djinnidark.png#gh-dark-mode-only" width=20 alt="DJinni Icon Dark"> icon at the top of the page will open the DJinni Music Player.
+Clicking the <img src="https://raw.githubusercontent.com/kgbergman/music-player/main/docs/djinni.png#gh-light-mode-only" width=20 alt="DJGambit Icon"><img src="https://raw.githubusercontent.com/kgbergman/music-player/main/docs/djinnidark.png#gh-dark-mode-only" width=20 alt="DJGambit Icon Dark"> icon at the top of the page will open the DJGambit Music Player.
 
 
 ### Header
@@ -63,7 +63,7 @@ Each stream has a fade-out option. When you click on the stream to end it, it wi
 
 From this page, you can also add, edit, and delete links.
 
-For example, this stream has a few different sound effect links: waves, seagulls, and footsteps on sand. DJinni mixes these together to provide a "beach" ambience. Each stream has a volume level, and each link has a volume level (relative to the other links within that stream). 
+For example, this stream has a few different sound effect links: waves, seagulls, and footsteps on sand. DJGambit mixes these together to provide a "beach" ambience. Each stream has a volume level, and each link has a volume level (relative to the other links within that stream). 
 
 You can see that the waves are playing on a constant loop, but the seagulls and footsteps will loop with a slightly randomized delay in between each. This sounds more organic and won't just be the same repeating noises over and over. 
 
@@ -79,7 +79,7 @@ A player can control their own local volume and mute options, as well as see how
 
 If you are having trouble hearing the streams, please be sure you are either using Firefox or Safari on a desktop computer, or [follow the instructions here](https://github.com/kgbergman/music-player/blob/main/docs/autoplay.md) to allow autoplay on Google Chrome or Microsoft Edge.
 
-There is currently no way to autoplay streams on mobile browsers due to policies enacted from by Apple (iOS) and Google (Android). You can still use DJinni as a control-center on mobile devices, but you won't hear any audio.
+There is currently no way to autoplay streams on mobile browsers due to policies enacted from by Apple (iOS) and Google (Android). You can still use DJGambit as a control-center on mobile devices, but you won't hear any audio.
 
 
 ### Support

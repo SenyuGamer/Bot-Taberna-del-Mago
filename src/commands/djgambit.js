@@ -1,14 +1,14 @@
 import { SlashCommandBuilder, MessageFlags } from "discord.js";
-import { generarCodigoVinculacion } from "../djinniBridge.js";
+import { generarCodigoVinculacion } from "../djgambitBridge.js";
 import { listarCancionesMenu } from "../db.js";
 import { TEMA, embed, embedError, esDMoAdmin } from "../utils.js";
 
 const COLOR = 0x1db954; // verde música
 const EMOJI = "🧞";
 
-export const djinni = {
+export const djgambit = {
   data: new SlashCommandBuilder()
-    .setName("djinni")
+    .setName("djgambit")
     .setDescription("Menú musical del DM (página dentro de Owlbear que reproduce en Discord)")
     .addSubcommand((sub) =>
       sub
@@ -26,7 +26,7 @@ export const djinni = {
       const canciones = listarCancionesMenu();
       if (canciones.length === 0) {
         return interaction.reply({
-          embeds: [embed(COLOR, `${EMOJI} El menú todavía está vacío. Añade canciones desde el panel (Oyente → extensión DJINNI) con el botón **Añadir**.\n\n*O permite que el DM guarde canciones ahí y se reproduzcan aquí en Discord.*`)],
+          embeds: [embed(COLOR, `${EMOJI} El menú todavía está vacío. Añade canciones desde el panel (Oyente → extensión DJGAMBIT) con el botón **Añadir**.\n\n*O permite que el DM guarde canciones ahí y se reproduzcan aquí en Discord.*`)],
         });
       }
       const lineas = canciones.map((c) => `${c.icono || "🎵"} **${c.nombre}**${c.loop ? " 🔁" : ""} — <${c.url}>`);
@@ -49,9 +49,9 @@ export const djinni = {
           COLOR,
           `🧞 **Código de verificación**\n\n` +
           `**\`${codigo}\`** *(válido 10 minutos, uso único)*\n\n` +
-          `Ábrelo en el panel DJINNI dentro de Owlbear y pega el código para vincular la página a **${interaction.guild.name}**. ` +
+          `Ábrelo en el panel DJGAMBIT dentro de Owlbear y pega el código para vincular la página a **${interaction.guild.name}**. ` +
           `Cuando pulses una canción ahí, sonará en el canal que hayas conectado con \`/musica unir\`.`,
-          `${EMOJI} Vincular panel DJINNI`
+          `${EMOJI} Vincular panel DJGAMBIT`
         ),
       ],
       flags: MessageFlags.Ephemeral,

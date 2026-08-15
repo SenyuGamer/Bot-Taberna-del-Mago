@@ -2,11 +2,11 @@ import "./App.css";
 import React, { useState, useEffect, useCallback } from "react";
 import OBR from "@owlbear-rodeo/sdk";
 
-// Panel "DJINNI · Taberna del Mago" para el DM.
+// Panel "DJGAMBIT · Taberna del Mago" para el DM.
 // - Solo se muestra al GM (la extensión, vista del DM).
-// - Se vincula a un servidor de Discord con un código (/djinni vincular).
+// - Se vincula a un servidor de Discord con un código (/djgambit vincular).
 // - Muestra el menú global de canciones como tarjetas horizontales (icono encima,
-//   nombre debajo), igual que la app original de DJINNI.
+//   nombre debajo), igual que la app original de DJGAMBIT.
 // - Clic en una tarjeta → suena SOLO en el bot de Discord (nunca aquí).
 // - Feedback: mientras la canción carga se muestra un spinner en la tarjeta.
 
@@ -32,7 +32,7 @@ function api(token) {
 
 export default function App() {
   const [estado, setEstado] = useState(ESTADOS.CARGANDO);
-  const [token, setToken] = useState(() => localStorage.getItem("djinni_token") || "");
+  const [token, setToken] = useState(() => localStorage.getItem("djgambit_token") || "");
   const [codigo, setCodigo] = useState("");
   const [canciones, setCanciones] = useState([]);
   const [sonando, setSonando] = useState(null); // { id, nombre }
@@ -48,12 +48,12 @@ export default function App() {
     if (!token) return;
     const f = api(token);
     try {
-      const [menu, est] = await Promise.all([f("/api/djinni/menu"), f("/api/djinni/estado")]);
+      const [menu, est] = await Promise.all([f("/api/djgambit/menu"), f("/api/djgambit/estado")]);
       setCanciones(menu.canciones ?? []);
       setSonando(est.sonando ? { id: est.cancionId, nombre: est.nombre } : null);
     } catch (e) {
       if (/vinculado/i.test(e.message)) {
-        localStorage.removeItem("djinni_token");
+        localStorage.removeItem("djgambit_token");
         setToken("");
         setEstado(ESTADOS.NO_VINCULADO);
       }
@@ -83,11 +83,11 @@ export default function App() {
     setVinculando(true);
     setError("");
     try {
-      const datos = await api()("/api/djinni/vincula", {
+      const datos = await api()("/api/djgambit/vincula", {
         method: "POST",
         body: JSON.stringify({ codigo: codigo.trim() }),
       });
-      localStorage.setItem("djinni_token", datos.token);
+      localStorage.setItem("djgambit_token", datos.token);
       setToken(datos.token);
       setGuildName(datos.guildName ?? "");
       setEstado(ESTADOS.LISTO);
@@ -100,7 +100,7 @@ export default function App() {
   }
 
   function desvincular() {
-    localStorage.removeItem("djinni_token");
+    localStorage.removeItem("djgambit_token");
     setToken("");
     setEstado(ESTADOS.NO_VINCULADO);
   }
@@ -110,7 +110,7 @@ export default function App() {
     setError("");
     setMensaje("");
     try {
-      await api(token)("/api/djinni/play", { method: "POST", body: JSON.stringify({ id }) });
+      await api(token)("/api/djgambit/play", { method: "POST", body: JSON.stringify({ id }) });
       setSonando({ id, nombre });
       setMensaje(`✓ Sonando: ${nombre}`);
     } catch (e) {
@@ -125,7 +125,7 @@ export default function App() {
     setMensaje("");
     setCargandoId("detener");
     try {
-      await api(token)("/api/djinni/stop", { method: "POST", body: JSON.stringify({}) });
+      await api(token)("/api/djgambit/stop", { method: "POST", body: JSON.stringify({}) });
       setSonando(null);
       setMensaje("✓ Reproducción detenida");
     } catch (e) {
@@ -143,7 +143,7 @@ export default function App() {
       return;
     }
     try {
-      await api(token)("/api/djinni/menu", { method: "POST", body: JSON.stringify(nueva) });
+      await api(token)("/api/djgambit/menu", { method: "POST", body: JSON.stringify(nueva) });
       setNueva({ nombre: "", icono: "", url: "", loop: false });
       setMostrarForm(false);
       await recargar();
@@ -155,7 +155,7 @@ export default function App() {
   async function borrar(id) {
     setError("");
     setMensaje("");
-    await api(token)(`/api/djinni/menu/${id}`, { method: "DELETE" }).catch((e) => setError(e.message));
+    await api(token)(`/api/djgambit/menu/${id}`, { method: "DELETE" }).catch((e) => setError(e.message));
     await recargar();
     if (sonando?.id === id) setSonando(null);
   }
@@ -170,7 +170,7 @@ export default function App() {
     return (
       <div className="app">
         <div className="app-row">
-          <span className="titulo">🧞 DJINNI</span>
+          <span className="titulo">🧞 DJGAMBIT</span>
           <span className="aviso">Solo el <b>DM</b> ve el menú musical.</span>
         </div>
       </div>
@@ -180,8 +180,8 @@ export default function App() {
   if (estado === ESTADOS.NO_VINCULADO) {
     return (
       <div className="app">
-        <span className="titulo">🧞 DJINNI · Taberna del Mago</span>
-        <p className="aviso">Pega el código de verificación de <code>/djinni vincular</code> para enlazar este panel con el bot de Discord.</p>
+        <span className="titulo">🧞 DJGAMBIT · Taberna del Mago</span>
+        <p className="aviso">Pega el código de verificación de <code>/djgambit vincular</code> para enlazar este panel con el bot de Discord.</p>
         <input
           className="input"
           value={codigo}
