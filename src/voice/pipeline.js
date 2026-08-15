@@ -31,11 +31,13 @@ export function crearPipeline({ url, loop = false, loopDelayMs, onDatos, onFin, 
   const cmdYt = rutas.yt ?? YTDLP;
   const cmdFf = rutas.ff ?? FFMPEG;
   const MAX_REINTENTOS = 4;
+  const MAX_REINTENTOS_MEDIO = 3; // relanzar si YouTube corta la descarga a mitad
   let ytActual = null;
   let ffActual = null;
   let detenido = false;
   let primerChunk = false;
   let reintentos = 0;
+  let reintentosMedio = 0;
   let reintentando = false;
   const eventos = {};
 
@@ -66,7 +68,15 @@ export function crearPipeline({ url, loop = false, loopDelayMs, onDatos, onFin, 
         // Sin yt-dlp: ffmpeg decodifica directo el archivo guardado en disco.
         ff = spawn(cmdFf, ["-hide_banner", "-loglevel", "error", "-re", "-i", archivoCache, "-vn", "-f", "s16le", "-ar", "48000", "-ac", "2", "pipe:1"], { stdio: ["ignore", "pipe", "pipe"] });
       } else {
-        yt = spawn(cmdYt, ["--no-playlist", "--no-progress", "-f", "bestaudio/best", "-o", "-", url], { stdio: ["ignore", "pipe", "pipe"] });
+        yt = spawn(cmdYt, [
+          "--no-playlist", "--no-progress",
+          // YouTube exige runtime JS para resolver retos ("n challenge"); usamos el node del bot.
+          "--js-runtimes", `node:${process.execPath}`,
+          // Probar varios clientes hasta dar con uno que no responda 403.
+          "--extractor-args", "youtube:player_client=android,ios,web,tv",
+          "--retries", "3", "--fragment-retries", "3",
+          "-f", "bestaudio/best", "-o", "-", url,
+        ], { stdio: ["ignore", "pipe", "pipe"] });
         ff = spawn(cmdFf, ["-hide_banner", "-loglevel", "error", "-re", "-i", "pipe:0", "-vn", "-f", "s16le", "-ar", "48000", "-ac", "2", "pipe:1"], { stdio: ["pipe", "pipe", "pipe"] });
         if (archivoCache) {
           // Guarda una copia de lo que descarga yt-dlp para la próxima vez.
@@ -118,12 +128,19 @@ export function crearPipeline({ url, loop = false, loopDelayMs, onDatos, onFin, 
         }
       }
       try { ff.stdin.end(); } catch {}
-      if (detenido || primerChunk) return; // ya sonó algo: no reintentamos
-      if (code && code !== 0 && reintentos < MAX_REINTENTOS) {
+      if (detenido) return;
+      if (code && code !== 0 && !primerChunk && reintentos < MAX_REINTENTOS) {
         // YouTube rate-limita las IP (HTTP 403) de forma intermitente: reintentamos.
         reintentos++;
         reintentando = true;
         setTimeout(lanzar, 1500 * reintentos).unref?.();
+      } else if (code && code !== 0 && primerChunk && reintentosMedio < MAX_REINTENTOS_MEDIO) {
+        // YouTube cortó la descarga a mitad de la canción: relanzamos desde el inicio
+        // (mejor que quedarse en silencio).
+        reintentosMedio++;
+        reintentando = true;
+        console.log(`🎵 Descarga cortada por YouTube (código ${code}); relanzando (${reintentosMedio}/${MAX_REINTENTOS_MEDIO}).`);
+        setTimeout(lanzar, 2000).unref?.();
       } else if (code && code !== 0) {
         finalizarError(new Error(`yt-dlp falló (código ${code}): ${erroresYt.trim().slice(-250) || "URL no soportada"}`));
       }
@@ -141,8 +158,8 @@ export function crearPipeline({ url, loop = false, loopDelayMs, onDatos, onFin, 
       if (loop) {
         const espera = typeof loopDelayMs === "function" ? loopDelayMs() : (loopDelayMs ?? 750);
         setTimeout(() => { if (!detenido) lanzar(); }, espera).unref?.();
-      } else if (!primerChunk && reintentando) {
-        // El reintento está en curso; esperamos a su desenlace.
+      } else if (reintentando) {
+        // Hay un reintento en curso (pre- o mid-stream); esperamos su desenlace.
       } else if (!primerChunk) {
         finalizarError(new Error("La tubería de audio terminó sin emitir audio."));
       } else {

@@ -8,6 +8,7 @@ import {
   canalGuardado,
 } from "../voice/sessionManager.js";
 import { listarCancionesMenu } from "../db.js";
+import { generarCodigoVinculacion } from "../djgambitBridge.js";
 import { TEMA, embed, embedError, esDMoAdmin } from "../utils.js";
 
 const COLOR = 0x1db954; // verde música
@@ -44,7 +45,12 @@ export const musica = {
       sub
         .setName("menu")
         .setDescription("Muestra las canciones guardadas en el menú del DM")
-        .addBooleanOption((opt) => opt.setName("reproducir").setDescription("Pide al DM que reproduzca una con /djgambit menu"))
+        .addBooleanOption((opt) => opt.setName("reproducir").setDescription("Pide al DM que reproduzca una desde el panel DJGAMBIT"))
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName("vincular")
+        .setDescription("Genera un código para vincular el panel DJGAMBIT (Owlbear) a este servidor")
     )
     .addSubcommand((sub) =>
       sub
@@ -95,6 +101,30 @@ export const musica = {
       });
     }
 
+    // -------- vincular (panel DJGAMBIT de Owlbear) --------
+    if (sub === "vincular") {
+      if (!esDMoAdmin(interaction)) {
+        return interaction.reply({
+          embeds: [embedError("Solo el DM o un administrador puede vincular el menú musical.")],
+          flags: MessageFlags.Ephemeral,
+        });
+      }
+      const codigo = generarCodigoVinculacion(interaction.guildId);
+      return interaction.reply({
+        embeds: [
+          embed(
+            COLOR,
+            `🧞 **Código de verificación**\n\n` +
+            `**\`${codigo}\`** *(válido 10 minutos, uso único)*\n\n` +
+            `Ábrelo en el panel DJGAMBIT dentro de Owlbear y pega el código para vincular la página a **${interaction.guild.name}**. ` +
+            `Cuando pulses una canción ahí, sonará en el canal que hayas conectado con \`/musica unir\`.`,
+            `${EMOJI} Vincular panel DJGAMBIT`
+          ),
+        ],
+        flags: MessageFlags.Ephemeral,
+      });
+    }
+
     // -------- unir --------
     if (sub === "unir") {
       const canalElegido = interaction.options.getChannel("canal");
@@ -123,7 +153,7 @@ export const musica = {
           embed(
             COLOR,
             `${EMOJI} **Conectado a ${canal.name}**.\n` +
-            `Pon música con \`/musica url\`, elige del menú del DM desde Owlbear (\`/djgambit\`), o guárdalas con el propio panel DJGAMBIT.\n\n*Para cortar: \`/musica parar todo\`.*`,
+            `Pon música con \`/musica url\`, o abre el panel DJGAMBIT (Owlbear) y pulsa una canción del menú.\n\n*Para cortar: \`/musica parar todo\`.*`,
             `${EMOJI} La taberna suena`
           ),
         ],

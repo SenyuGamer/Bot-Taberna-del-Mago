@@ -84,7 +84,7 @@ export function registrarRutaTemporal(path, { timeoutMs = 5 * 60_000, manejador 
 
 /**
  * Genera un cÃ³digo de verificaciÃ³n de un solo uso para vincular el panel a un
- * servidor de Discord. Lo crea el comando /djgambit vincular.
+ * servidor de Discord. Lo crea el comando /musica vincular.
  */
 export function generarCodigoVinculacion(guildId) {
   // Limpia cÃ³digos caducados de la misma guild
@@ -175,13 +175,13 @@ export function crearAppDjgambit() {
   });
 
   // ---------- VinculaciÃ³n con cÃ³digo ----------
-  // El DM genera un cÃ³digo con /djgambit vincular y lo introduce en el panel.
+  // El DM genera un cÃ³digo con /musica vincular y lo introduce en el panel.
   app.post("/api/djgambit/vincula", (req, res) => {
     const codigo = String(req.body?.codigo ?? "").trim();
     const info = codigos.get(codigo);
     if (!info || info.expira < Date.now()) {
       if (info) codigos.delete(codigo);
-      return res.status(401).json({ ok: false, error: "CÃ³digo invÃ¡lido o caducado. Genera uno nuevo con /djgambit vincular." });
+      return res.status(401).json({ ok: false, error: "CÃ³digo invÃ¡lido o caducado. Genera uno nuevo con /musica vincular." });
     }
     codigos.delete(codigo); // un solo uso
     const token = randomBytes(24).toString("hex");
@@ -197,7 +197,7 @@ export function crearAppDjgambit() {
   });
 
   app.post("/api/djgambit/menu", (req, res) => {
-    if (!guildDeToken(req)) return res.status(401).json({ ok: false, error: "Panel no vinculado. Usa /djgambit vincular." });
+    if (!guildDeToken(req)) return res.status(401).json({ ok: false, error: "Panel no vinculado. Usa /musica vincular." });
     const { nombre, icono = "", url = "", loop = false } = req.body ?? {};
     if (!nombre?.trim() || !/^https?:\/\//i.test(url)) {
       return res.status(400).json({ ok: false, error: "Nombre y URL vÃ¡lida son obligatorios." });
@@ -208,7 +208,7 @@ export function crearAppDjgambit() {
   });
 
   app.delete("/api/djgambit/menu/:id", (req, res) => {
-    if (!guildDeToken(req)) return res.status(401).json({ ok: false, error: "Panel no vinculado. Usa /djgambit vincular." });
+    if (!guildDeToken(req)) return res.status(401).json({ ok: false, error: "Panel no vinculado. Usa /musica vincular." });
     const id = Number(req.params.id);
     const borrada = borrarCancionMenu(id);
     if (!borrada) return res.status(404).json({ ok: false, error: "CanciÃ³n no encontrada." });
@@ -222,7 +222,7 @@ export function crearAppDjgambit() {
     const guildId = guildDeToken(req);
     const { id } = req.body ?? {};
     const cancion = id ? getCancionMenu(Number(id)) : null;
-    if (!guildId) return res.status(401).json({ ok: false, error: "Panel no vinculado a un servidor. Usa /djgambit vincular." });
+    if (!guildId) return res.status(401).json({ ok: false, error: "Panel no vinculado a un servidor. Usa /musica vincular." });
     if (!cancion) return res.status(404).json({ ok: false, error: "CanciÃ³n no encontrada en el menÃº." });
 
     setImmediate(() => {
@@ -232,14 +232,14 @@ export function crearAppDjgambit() {
 
   app.post("/api/djgambit/stop", (req, res) => {
     const guildId = guildDeToken(req);
-    if (!guildId) return res.status(401).json({ ok: false, error: "Panel no vinculado a un servidor. Usa /djgambit vincular." });
+    if (!guildId) return res.status(401).json({ ok: false, error: "Panel no vinculado a un servidor. Usa /musica vincular." });
     const parada = pararCancionMenu(guildId);
     res.json({ ok: true, parada });
   });
 
   app.get("/api/djgambit/estado", (req, res) => {
     const guildId = guildDeToken(req);
-    if (!guildId) return res.status(401).json({ ok: false, error: "Panel no vinculado a un servidor. Usa /djgambit vincular." });
+    if (!guildId) return res.status(401).json({ ok: false, error: "Panel no vinculado a un servidor. Usa /musica vincular." });
     res.json({ ok: true, ...estadoCancionMenu(guildId) });
   });
 

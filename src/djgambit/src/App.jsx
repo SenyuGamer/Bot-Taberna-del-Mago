@@ -4,7 +4,7 @@ import OBR from "@owlbear-rodeo/sdk";
 
 // Panel "DJGAMBIT · Taberna del Mago" para el DM.
 // - Solo se muestra al GM (la extensión, vista del DM).
-// - Se vincula a un servidor de Discord con un código (/djgambit vincular).
+// - Se vincula a un servidor de Discord con un código (/musica vincular).
 // - Muestra el menú global de canciones como tarjetas horizontales (icono encima,
 //   nombre debajo), igual que la app original de DJGAMBIT.
 // - Clic en una tarjeta → suena SOLO en el bot de Discord (nunca aquí).
@@ -181,7 +181,7 @@ export default function App() {
     return (
       <div className="app">
         <span className="titulo">🧞 DJGAMBIT · Taberna del Mago</span>
-        <p className="aviso">Pega el código de verificación de <code>/djgambit vincular</code> para enlazar este panel con el bot de Discord.</p>
+        <p className="aviso">Pega el código de verificación de <code>/musica vincular</code> para enlazar este panel con el bot de Discord.</p>
         <input
           className="input"
           value={codigo}
