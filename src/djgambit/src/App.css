@@ -36,6 +36,36 @@
   gap: 8px;
 }
 
+.crossfade-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 15px;
+  background: rgb(34, 38, 57);
+  border-radius: 8px;
+  padding: 5px 10px;
+}
+
+.crossfade-control input[type="range"] {
+  width: 90px;
+  accent-color: rgb(129, 77, 222);
+  cursor: pointer;
+}
+
+.crossfade-val {
+  font-size: 12px;
+  font-weight: 700;
+  min-width: 26px;
+  text-align: center;
+  opacity: 0.55;
+  color: #c0c2c7;
+}
+
+.crossfade-val.activo {
+  opacity: 1;
+  color: rgb(255, 196, 87);
+}
+
 .toggle {
   display: inline-flex;
   align-items: center;
@@ -56,6 +86,11 @@
 .titulo {
   font-size: 17px;
   font-weight: 700;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .aviso {

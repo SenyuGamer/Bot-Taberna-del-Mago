@@ -254,13 +254,14 @@ export function crearAppDjgambit() {
 
   app.post("/api/djgambit/play", (req, res) => {
     const guildId = guildDeToken(req);
-    const { id, crossfade, loop = false, loopCategoria = false } = req.body ?? {};
+    const { id, crossfade = 0, loop = false, loopCategoria = false } = req.body ?? {};
     const cancion = id ? getCancionMenu(Number(id)) : null;
     if (!guildId) return res.status(401).json({ ok: false, error: "Panel no vinculado a un servidor. Usa /musica vincular." });
     if (!cancion) return res.status(404).json({ ok: false, error: "CanciÃ³n no encontrada en el menÃº." });
 
     setImmediate(() => {
-      reproducirConSesion(req, res, guildId, cancion, crossfade ? 3000 : 0, !!loop, !!loopCategoria);
+      const ms = Number(crossfade) > 0 ? Number(crossfade) * 1000 : 0;
+      reproducirConSesion(req, res, guildId, cancion, ms, !!loop, !!loopCategoria);
     });
   });
 

@@ -46,7 +46,7 @@ export default function App() {
   const [cargandoId, setCargandoId] = useState(null); // id de la canción en proceso
   const [mostrarForm, setMostrarForm] = useState(false);
   const [nueva, setNueva] = useState({ nombre: "", icono: "", url: "", categoria: "" });
-  const [crossfade, setCrossfade] = useState(() => localStorage.getItem("djgambit_crossfade") === "1");
+  const [crossfadeS, setCrossfadeS] = useState(() => Number(localStorage.getItem("djgambit_crossfade_s")) || 0); // segundos (0 = off)
   const [loops, setLoops] = useState(() => JSON.parse(localStorage.getItem("djgambit_loops") || "{}")); // id -> bool
   const [cats, setCats] = useState(() => JSON.parse(localStorage.getItem("djgambit_cats") || "{}")); // categoria -> bool (playlist)
 
@@ -131,7 +131,7 @@ export default function App() {
     setMensaje("");
     try {
       const catLoop = categoria ? !!cats[categoria] : false;
-      const body = { id, crossfade };
+      const body = { id, crossfade: crossfadeS };
       if (catLoop) {
         body.loopCategoria = true; // suena toda la categoría en bucle desde esta canción
       } else {
@@ -147,11 +147,9 @@ export default function App() {
     }
   }
 
-  function alternarCrossfade() {
-    setCrossfade((v) => {
-      localStorage.setItem("djgambit_crossfade", v ? "0" : "1");
-      return !v;
-    });
+  function cambiarCrossfade(v) {
+    setCrossfadeS(v);
+    localStorage.setItem("djgambit_crossfade_s", String(v));
   }
 
   function alternarLoopCancion(id) {
@@ -286,9 +284,18 @@ export default function App() {
         <span className="titulo">🧞 Menú musical{guildName ? ` · ${guildName}` : ""}</span>
         <div className="cab-right">
           <button className="boton boton-chico" onClick={cachearTodas} title="Descargar todas las canciones a caché" disabled={cargandoId !== null}>⬇</button>
-          <label className="toggle" title="Fundir la canción anterior en la nueva al cambiar">
-            <input type="checkbox" checked={crossfade} onChange={alternarCrossfade} /> 🔀
-          </label>
+          <div className="crossfade-control" title="Crossfade al cambiar de canción (segundos)">
+            <span>🔀</span>
+            <input
+              type="range"
+              min="0"
+              max="10"
+              step="0.5"
+              value={crossfadeS}
+              onChange={(e) => cambiarCrossfade(Number(e.target.value))}
+            />
+            <span className={`crossfade-val ${crossfadeS > 0 ? "activo" : ""}`}>{crossfadeS > 0 ? `${crossfadeS}s` : "off"}</span>
+          </div>
           <button className="boton boton-chico" onClick={desvincular} title="Desvincular este panel">⏻</button>
         </div>
       </div>
