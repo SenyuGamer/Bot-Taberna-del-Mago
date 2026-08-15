@@ -46,8 +46,8 @@ export async function unir(guild, canal, clientId) {
     channelId: canal.id,
     guildId: guild.id,
     adapterCreator: guild.voiceAdapterCreator,
-    selfDeaf: false,
-    selfMute: false,
+    selfDeaf: true, // ensordecido: como hacen los bots de música (sin indicador de "escuchando")
+    selfMute: false, // sigue hablando: el audio se transmite igualmente
     daveEncryption: true, // Discord exige DAVE (close 4017). En RISC-V se usa el build WASM de davey.
   });
 
@@ -79,6 +79,7 @@ export async function unir(guild, canal, clientId) {
     connection,
     player,
     mixer,
+    recurso,
     fuentes: new Map(), // id -> {id, url, tipo, loop, volumen, userId, pipeline}
     temporizadorVacio: null,
   };
@@ -131,7 +132,7 @@ export function quitarFuente(guildId, id) {
  * Añade una fuente (YouTube u otra URL que entienda yt-dlp).
  * Devuelve { promesa } — `promesa` resuelve al primer audio o rechaza con el error.
  */
-export function agregarFuente(guildId, { id, url, volumen = 1, loop = false, loopDelayMs, tipo = "djinni", userId = null, onError }) {
+export function agregarFuente(guildId, { id, url, volumen = 1, loop = false, loopDelayMs, tipo = "djinni", userId = null, nombre = "", cancionId = null, onError }) {
   const s = sesiones.get(guildId);
   if (!s) return null;
   if (s.fuentes.has(id)) _quitarFuenteDeSesion(s, id);
@@ -157,7 +158,7 @@ export function agregarFuente(guildId, { id, url, volumen = 1, loop = false, loo
     },
   });
 
-  s.fuentes.set(id, { id, url, tipo, loop, volumen: clampVolumen(volumen), userId, pipeline });
+  s.fuentes.set(id, { id, url, tipo, loop, volumen: clampVolumen(volumen), userId, nombre, cancionId, pipeline });
   pipeline.esperarPrimerAudio?.().then(resolvePrimer).catch(rejectPrimer);
 
   return { promesa };
@@ -176,69 +177,45 @@ export function quitarFuentesManuales(guildId, { soloDe = null } = {}) {
   return quitadas;
 }
 
-// ---------- Espejo de estado Djinni ----------
+// ---------- Menú de canciones del DM (panel Owlbear → bot) ----------
 
 /**
- * Aplica el estado de Djinni (streams activos, volúmenes, pausa global) a la sesión.
- * Solo se refleja el modo "global" (lo que oyen los jugadores).
+ * Reproduce una canción del menú en la sesión. Devuelve null si no hay sesión,
+ * o { promesa } (resuelve al primer audio, rechaza con el error).
  */
-export function aplicarEstadoDjinni(guildId, estado) {
+export function reproducirCancionMenu(guildId, { id = null, url, nombre = "", loop = false }) {
   const s = sesiones.get(guildId);
-  if (!s || !estado) return { activos: 0, pausado: false };
+  if (!s) return null;
 
-  const pausadoGlobal = estado.paused === "paused";
-  const globalOn = estado.soundOutput !== "local";
-  const deseados = new Map(); // id -> {url, volumen}
-
-  if (globalOn && Array.isArray(estado.streams)) {
-    for (const stream of estado.streams) {
-      if (!stream?.playing || stream.streamMute) continue;
-      const volStream = clampVolumen(stream.streamVolume ?? 1);
-      const links = Array.isArray(stream.links) ? stream.links : [];
-      links.forEach((link, i) => {
-        if (!link?.link || link.playing === false || link.mute) return;
-        const id = `djinni:${stream.id}:${i}`;
-        // Djinni: loop con loop1/loop2 = repetición con retardo aleatorio (se aproxima)
-        const min = Math.max(0, Number(link.loopMinSec) || 0);
-        const max = Math.max(min, Number(link.loopMaxSec) || 0);
-        const loopDelayMs = min === 0 && max === 0
-          ? 750
-          : () => (min + Math.random() * (max - min)) * 1000;
-        deseados.set(id, { url: link.link, volumen: volStream * clampVolumen(link.volume ?? 1), loop: !!link.loop, loopDelayMs });
-      });
-    }
-  }
-
-  // Quitar las fuentes djinni que ya no suenan
-  for (const [id] of [...s.fuentes.entries()]) {
-    if (id.startsWith("djinni:") && !deseados.has(id)) _quitarFuenteDeSesion(s, id);
-  }
-
-  // Añadir o ajustar las que suenan
-  for (const [id, deseado] of deseados) {
-    const existente = s.fuentes.get(id);
-    if (!existente) {
-      const creado = agregarFuente(guildId, { id, url: deseado.url, volumen: deseado.volumen, loop: deseado.loop, loopDelayMs: deseado.loopDelayMs, tipo: "djinni",
-        onError: (e) => console.error(`🎵 Fuente Djinni ${id} falló:`, e.message) });
-      // Evita unhandledRejection cuando el DM cambia de pista y la tubería falla
-      creado?.promesa.catch(() => {});
-    } else if (Math.abs(existente.volumen - deseado.volumen) > 0.01) {
-      existente.volumen = deseado.volumen;
-      s.mixer.setVolumen(id, deseado.volumen);
-    }
-  }
-
-  s.mixer.setPausado(pausadoGlobal);
-  return { activos: deseados.size, pausado: pausadoGlobal };
+  // El menú reproduce una canción a la vez (id estable "menu:activa").
+  const fuenteId = "menu:activa";
+  return agregarFuente(guildId, {
+    id: fuenteId,
+    url,
+    volumen: 1,
+    loop,
+    nombre,
+    tipo: "menu",
+    cancionId: id,
+    onError: (e) => console.error(`🎵 Canción del menú falló:`, e.message),
+  });
 }
 
-/** Aplica el estado a TODAS las sesiones activas (puente sin token: siguen todas al DM). */
-export function aplicarEstadoDjinniGlobal(estado) {
-  const resumen = [];
-  for (const guildId of sesiones.keys()) {
-    resumen.push({ guildId, ...aplicarEstadoDjinni(guildId, estado) });
-  }
-  return resumen;
+/** Detiene la canción del menú si estaba sonando. */
+export function pararCancionMenu(guildId) {
+  const s = sesiones.get(guildId);
+  if (!s) return false;
+  if (!s.fuentes.has("menu:activa")) return false;
+  _quitarFuenteDeSesion(s, "menu:activa");
+  return true;
+}
+
+/** Estado de la canción del menú en la sesión (para el panel). */
+export function estadoCancionMenu(guildId) {
+  const s = sesiones.get(guildId);
+  const fuente = s?.fuentes.get("menu:activa");
+  if (!fuente) return { sonando: false, url: null, nombre: null, cancionId: null };
+  return { sonando: true, url: fuente.url, nombre: fuente.nombre, cancionId: fuente.cancionId ?? null };
 }
 
 // ---------- Salida automática si el canal se queda vacío ----------

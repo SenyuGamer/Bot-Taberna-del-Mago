@@ -33,11 +33,7 @@ module.exports = {
 	],
 	"rules": {
 		"react/prop-types": 0,
-		"indent": [
-			"error",
-			"tab",
-			{ "SwitchCase": 1 } 
-		],
+		"indent": "off",
 		"linebreak-style": [
 			"off",
 			"windows"

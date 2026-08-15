@@ -5,9 +5,8 @@ import { dm } from "./commands/dm.js";
 import { registros } from "./commands/registros.js";
 import { sincronizar } from "./commands/sincronizar.js";
 import { hora } from "./commands/hora.js";
-import { syncmusic } from "./commands/syncmusic.js";
 import { musica } from "./commands/musica.js";
-import { testmusic } from "./commands/testmusic.js";
+import { djinni } from "./commands/djinni.js";
 import { embedError } from "./utils.js";
 import { iniciarTwitch } from "./twitch.js";
 import { iniciarPuenteDjinni } from "./djinniBridge.js";
@@ -20,7 +19,7 @@ if (!token || token === "pega_aqui_tu_token") {
 }
 
 export const comandos = new Map(
-  [estrellitas, estrellitasNegras, inspiracion, dm, registros, sincronizar, hora, syncmusic, musica, testmusic].map((c) => [c.data.name, c])
+  [estrellitas, estrellitasNegras, inspiracion, dm, registros, sincronizar, hora, musica, djinni].map((c) => [c.data.name, c])
 );
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates] });

@@ -149,3 +149,69 @@ export function getCanalDjinni(guildId) {
 export function setCanalDjinni(guildId, channelId) {
   setCanalDjinniStmt.run(guildId, channelId, new Date().toISOString());
 }
+
+// ---------- Menú global de canciones del DM ----------
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS menu_canciones (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    nombre     TEXT NOT NULL,
+    icono      TEXT NOT NULL DEFAULT '',
+    url        TEXT NOT NULL,
+    loop       INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+  )
+`);
+
+const getMenuStmt = db.prepare("SELECT id, nombre, icono, url, loop FROM menu_canciones ORDER BY id ASC");
+const getCancionStmt = db.prepare("SELECT id, nombre, icono, url, loop FROM menu_canciones WHERE id = ?");
+const insertCancionStmt = db.prepare(
+  "INSERT INTO menu_canciones (nombre, icono, url, loop, created_at) VALUES (?, ?, ?, ?, ?)"
+);
+const deleteCancionStmt = db.prepare("DELETE FROM menu_canciones WHERE id = ?");
+
+export function listarCancionesMenu() {
+  return getMenuStmt.all().map((c) => ({ ...c, loop: !!c.loop }));
+}
+
+export function getCancionMenu(id) {
+  const c = getCancionStmt.get(id);
+  return c ? { ...c, loop: !!c.loop } : null;
+}
+
+export function agregarCancionMenu({ nombre, icono = "", url, loop = false }) {
+  const info = insertCancionStmt.run(nombre, icono, url, loop ? 1 : 0, new Date().toISOString());
+  return getCancionMenu(info.lastInsertRowid);
+}
+
+export function borrarCancionMenu(id) {
+  return deleteCancionStmt.run(id).changes > 0;
+}
+
+// ---------- Vínculos del panel Owlbear → guild ----------
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS djinni_links (
+    token      TEXT PRIMARY KEY,
+    guild_id   TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )
+`);
+
+const getLinkStmt = db.prepare("SELECT guild_id FROM djinni_links WHERE token = ?");
+const setLinkStmt = db.prepare(`
+  INSERT INTO djinni_links (token, guild_id, updated_at)
+  VALUES (?, ?, ?)
+  ON CONFLICT (token) DO UPDATE SET guild_id = excluded.guild_id, updated_at = excluded.updated_at
+`);
+
+/** Devuelve el guild_id vinculado a un token del panel, o null. */
+export function getGuildPorToken(token) {
+  const row = getLinkStmt.get(token);
+  return row ? row.guild_id : null;
+}
+
+/** Vincula un token del panel Owlbear a un guild de Discord. */
+export function setGuildPorToken(token, guildId) {
+  setLinkStmt.run(token, guildId, new Date().toISOString());
+}

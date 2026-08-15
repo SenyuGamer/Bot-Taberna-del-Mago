@@ -1,14 +1,257 @@
-.App {
-  text-align: center;
+/* Estética DJINNI (oscura, tarjetas cuadradas con icono grande encima, nombre debajo) */
+.app {
   display: flex;
   flex-direction: column;
-  height: 100%;
-  overflow-x: hidden;
-  overflow-y: hidden;
+  gap: 8px;
+  padding: 10px;
+  height: 100vh;
+  box-sizing: border-box;
+  background: rgb(45, 48, 66);
+  color: rgba(255, 255, 255, 0.87);
+  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
   overflow: hidden;
 }
 
-.audio-streams {
-  display: none;
-  height: 200px;
+.app-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px;
+  height: 100vh;
+  box-sizing: border-box;
+  background: rgb(45, 48, 66);
+  color: rgba(255, 255, 255, 0.87);
+}
+
+.cab {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.titulo {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.aviso {
+  font-size: 12px;
+  opacity: 0.9;
+}
+
+.code {
+  background: rgb(34, 38, 57);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+.input {
+  width: 100%;
+  box-sizing: border-box;
+  outline: 0;
+  border: none;
+  border-bottom: 2px solid rgb(192, 194, 199);
+  background-color: transparent;
+  color: white;
+  height: 26px;
+  font-size: 13px;
+}
+
+.input:focus {
+  border-bottom: 2px solid rgb(187, 153, 255);
+}
+
+.boton {
+  border: 0;
+  border-radius: 8px;
+  padding: 8px 14px;
+  background: rgb(41, 45, 60);
+  color: white;
+  cursor: pointer;
+  font-size: 13px;
+  transition: background-color 100ms linear;
+}
+
+.boton:hover {
+  background-color: rgb(58, 61, 75);
+}
+
+.boton:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.boton-primario {
+  background: rgb(129, 77, 222);
+}
+
+.boton-primario:hover {
+  background: rgb(140, 90, 235);
+}
+
+.boton-chico {
+  padding: 2px 8px;
+  font-size: 14px;
+}
+
+.boton-nueva {
+  width: 100%;
+  height: 92px;
+  font-size: 30px;
+  border-radius: 5px;
+  background-color: rgb(41, 45, 60);
+  color: #c0c2c7;
+}
+
+.boton-parar {
+  background: transparent;
+  font-size: 18px;
+}
+
+.mensajes {
+  min-height: 16px;
+}
+
+.ok { color: #7edc9a; font-size: 12px; }
+.error { color: #ff7070; font-size: 12px; }
+
+/* Escenario: fila horizontal de tarjetas (con scroll si hay muchas) */
+.escenario {
+  display: flex;
+  gap: 7px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  flex: 1;
+  min-height: 0;
+  padding-bottom: 4px;
+}
+
+.escena {
+  position: relative;
+  width: 88px;
+  height: 92px;
+  flex-shrink: 0;
+}
+
+.escena-btn {
+  width: 100%;
+  height: 100%;
+  border: 2px solid rgba(0, 0, 0, 0);
+  border-radius: 5px;
+  background-color: rgb(41, 45, 60);
+  color: white;
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  transition: background-color 100ms linear;
+}
+
+.escena-btn:hover {
+  background-color: rgb(58, 61, 75);
+  cursor: pointer;
+}
+
+.escena-sonando .escena-btn {
+  border-color: rgb(29, 185, 84);
+}
+
+.escena-cargando .escena-btn {
+  border-color: rgb(187, 153, 255);
+}
+
+.icono {
+  font-size: 34px;
+  line-height: 1;
+}
+
+.escena-fila {
+  width: 100%;
+  padding: 0 4px;
+  text-align: left;
+  font-size: 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 3px;
+}
+
+.nombre {
+  color: white;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.badge {
+  font-size: 10px;
+}
+
+.basura {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  border: 0;
+  background: rgba(0, 0, 0, 0.45);
+  border-radius: 8px;
+  font-size: 11px;
+  padding: 2px 4px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 100ms linear;
+}
+
+.escena:hover .basura { opacity: 1; }
+
+/* Formulario de añadir */
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 200px;
+  flex-shrink: 0;
+  background: rgb(34, 38, 57);
+  padding: 8px;
+  border-radius: 5px;
+}
+
+.fila {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+/* Spinner de carga */
+.spinner {
+  width: 26px;
+  height: 26px;
+  border: 3px solid rgba(255, 255, 255, 0.25);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin: 4px;
+}
+
+.spinner-pequeno {
+  width: 12px;
+  height: 12px;
+  border-width: 2px;
+  display: inline-block;
+  vertical-align: middle;
+  margin-right: 6px;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.pies {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }

@@ -1,15 +1,15 @@
 {
-  "name": "DJinni Music Player",
-  "version": "1.0.2",
+  "name": "DJINNI · Taberna del Mago",
+  "version": "2.0.0",
   "manifest_version": 1,
-  "author": "Keegan",
+  "author": "La Taberna del Mago",
   "icon": "/logo.png",
-  "description": "Mix sound effects and music with looping, fading, and more to provide an immersive experience!",
+  "description": "Menú musical del DM: elige una canción con su icono y suena en el bot de Discord (no se escucha aquí).",
   "action": {
-    "title": "DJinni Music Player",
+    "title": "DJINNI · Taberna del Mago",
     "icon": "/icon.svg",
     "popover": "/",
-    "height": 400,
-    "width": 580
+    "height": 420,
+    "width": 640
   }
 }

@@ -1,23 +1,38 @@
 import express from "express";
-import { createHash } from "node:crypto";
+import { randomBytes, randomInt } from "node:crypto";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
-import { aplicarEstadoDjinniGlobal, listarSesiones } from "./voice/sessionManager.js";
+import {
+  agregarCancionMenu,
+  borrarCancionMenu,
+  getCancionMenu,
+  getGuildPorToken,
+  listarCancionesMenu,
+  setGuildPorToken,
+} from "./db.js";
+import {
+  reproducirCancionMenu,
+  pararCancionMenu,
+  estadoCancionMenu,
+  getSesion,
+  unir,
+  canalGuardado,
+} from "./voice/sessionManager.js";
 
 // Puente HTTP Djinni → Discord.
-// - La extensión (navegador del DM) hace POST del estado de reproducción.
-// - Se sirve el build estático del fork (manifest.json incluido) con CORS porque
-//   Owlbear Rodeo carga la extensión desde otro origen (owlbear.rodeo).
+// - El panel (navegador del DM dentro de Owlbear) se vincula con un código de
+//   verificación y luego maneja el menú global de canciones: añadir, quitar y
+//   reproducir — el audio suena SOLO en el bot, nunca en el navegador.
+// - Se sirve el build estático del panel con CORS porque Owlbear Rodeo carga
+//   la extensión desde otro origen (owlbear.rodeo).
 // Sin puertos abiertos: sale por el túnel de Cloudflare.
 
 const DJINNI_PORT = Number(process.env.DJINNI_PORT || 0);
-const DJINNI_SLUG = process.env.DJINNI_SLUG || "";
 const DJINNI_DIR = process.env.DJINNI_DIR || "src/djinni/build";
 
-const intervaloRateLimit = new Map(); // ip -> ts último POST útil
-let ultimoHash = "";
-let ultimoHashTs = 0;
-const hashDe = (obj) => createHash("sha256").update(JSON.stringify(obj)).digest("hex");
+const TTL_CODIGO_MS = 10 * 60 * 1000; // el código de verificación dura 10 min
+const codigos = new Map(); // codigo -> { guildId, expira }
+let clienteActual = null; // client de discord.js (para unir al canal al reproducir)
 
 // ---------- Rutas temporales (callbacks OAuth de Twitch) ----------
 // El mismo servidor sirve la música y los callbacks de /sincronizar twitch,
@@ -67,6 +82,78 @@ export function registrarRutaTemporal(path, { timeoutMs = 5 * 60_000, manejador 
   return { promesa };
 }
 
+/**
+ * Genera un código de verificación de un solo uso para vincular el panel a un
+ * servidor de Discord. Lo crea el comando /djinni vincular.
+ */
+export function generarCodigoVinculacion(guildId) {
+  // Limpia códigos caducados de la misma guild
+  for (const [codigo, info] of codigos) {
+    if (info.guildId === guildId && info.expira < Date.now()) codigos.delete(codigo);
+  }
+  let codigo = "";
+  do {
+    codigo = randomInt(100000, 999999).toString();
+  } while (codigos.has(codigo));
+  codigos.set(codigo, { guildId, expira: Date.now() + TTL_CODIGO_MS });
+  return codigo;
+}
+
+function leerToken(req) {
+  const auth = req.headers.authorization ?? "";
+  const m = auth.match(/^Bearer\s+([^\s]+)$/i);
+  return m ? m[1] : null;
+}
+
+/** Devuelve el guildId vinculado al token del panel, o null. */
+function guildDeToken(req) {
+  const token = leerToken(req);
+  return token ? getGuildPorToken(token) : null;
+}
+
+/**
+ * Reprocha una canción del menú en el guild vinculado. Si el bot no está en el
+ * canal de voz, intenta unirse al que haya guardado (/musica unir anterior).
+ */
+async function reproducirConSesion(req, res, guildId, cancion) {
+  let sesion = getSesion(guildId);
+  let canalId = sesion?.canalId ?? canalGuardado(guildId);
+
+  if (!sesion && canalId && clienteActual) {
+    const guild = clienteActual.guilds.cache.get(guildId);
+    const canal = guild?.channels.cache.get(canalId);
+    if (guild && canal?.isVoiceBased?.()) {
+      try {
+        sesion = await unir(guild, canal, clienteActual.user.id);
+      } catch (error) {
+        console.error(`🎵 No pude unir el bot para el menú en ${guildId}:`, error.message);
+      }
+    }
+  }
+
+  if (!getSesion(guildId)) {
+    return res.status(409).json({
+      ok: false,
+      error: "El bot no está en un canal de voz. Conecta el bot con /musica unir y vuelve a pulsar.",
+    });
+  }
+
+  try {
+    const creado = reproducirCancionMenu(guildId, {
+      id: cancion.id,
+      url: cancion.url,
+      nombre: cancion.nombre,
+      loop: cancion.loop,
+    });
+    if (!creado) return res.status(409).json({ ok: false, error: "No hay sesión de voz activa." });
+    await creado.promesa;
+    res.json({ ok: true, cancion: { id: cancion.id, nombre: cancion.nombre, url: cancion.url } });
+  } catch (error) {
+    console.error(`🎵 Error reproduciendo ${cancion.nombre}:`, error.message);
+    res.status(502).json({ ok: false, error: `No pude reproducir esa canción: ${error.message}` });
+  }
+}
+
 export function crearAppDjinni() {
   const app = express();
   app.disable("x-powered-by");
@@ -74,8 +161,8 @@ export function crearAppDjinni() {
   // CORS: Owlbear Rodeo carga la extensión desde owlbear.rodeo (origen cruzado)
   app.use((req, res, next) => {
     res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
     if (req.method === "OPTIONS") return res.sendStatus(204);
     next();
   });
@@ -84,48 +171,79 @@ export function crearAppDjinni() {
   app.use(express.json({ limit: "128kb" }));
 
   app.get("/health", (_req, res) => {
-    res.json({ ok: true, nombre: "taberna-mago djinni bridge", sesiones: listarSesiones() });
+    res.json({ ok: true, nombre: "taberna-mago djinni bridge", canciones: listarCancionesMenu().length });
   });
 
-  app.post(`/api/state/${DJINNI_SLUG}`, (req, res) => {
-    let estado = req.body;
-    if (typeof estado === "string") {
-      try { estado = JSON.parse(estado || "{}"); } catch { estado = null; }
+  // ---------- Vinculación con código ----------
+  // El DM genera un código con /djinni vincular y lo introduce en el panel.
+  app.post("/api/djinni/vincula", (req, res) => {
+    const codigo = String(req.body?.codigo ?? "").trim();
+    const info = codigos.get(codigo);
+    if (!info || info.expira < Date.now()) {
+      if (info) codigos.delete(codigo);
+      return res.status(401).json({ ok: false, error: "Código inválido o caducado. Genera uno nuevo con /djinni vincular." });
     }
-    if (!estado || typeof estado !== "object" || Array.isArray(estado)) {
-      return res.status(400).json({ ok: false, error: "cuerpo inválido" });
+    codigos.delete(codigo); // un solo uso
+    const token = randomBytes(24).toString("hex");
+    setGuildPorToken(token, info.guildId);
+    const guild = clienteActual?.guilds.cache.get(info.guildId);
+    res.json({ ok: true, token, guildId: info.guildId, guildName: guild?.name ?? "" });
+  });
+
+  // ---------- Menú global de canciones ----------
+
+  app.get("/api/djinni/menu", (_req, res) => {
+    res.json({ ok: true, canciones: listarCancionesMenu() });
+  });
+
+  app.post("/api/djinni/menu", (req, res) => {
+    if (!guildDeToken(req)) return res.status(401).json({ ok: false, error: "Panel no vinculado. Usa /djinni vincular." });
+    const { nombre, icono = "", url = "", loop = false } = req.body ?? {};
+    if (!nombre?.trim() || !/^https?:\/\//i.test(url)) {
+      return res.status(400).json({ ok: false, error: "Nombre y URL válida son obligatorios." });
     }
+    const cancion = agregarCancionMenu({ nombre: nombre.trim(), icono: String(icono), url, loop: !!loop });
+    console.log(`🎵 Canción añadida al menú: ${cancion.nombre} <${url}>`);
+    res.json({ ok: true, cancion });
+  });
 
-    const ahora = Date.now();
+  app.delete("/api/djinni/menu/:id", (req, res) => {
+    if (!guildDeToken(req)) return res.status(401).json({ ok: false, error: "Panel no vinculado. Usa /djinni vincular." });
+    const id = Number(req.params.id);
+    const borrada = borrarCancionMenu(id);
+    if (!borrada) return res.status(404).json({ ok: false, error: "Canción no encontrada." });
+    console.log(`🎵 Canción ${id} quitada del menú.`);
+    res.json({ ok: true });
+  });
 
-    // Dedup primero: varios navegadores del mismo Owlbear pueden enviar el mismo
-    // estado a la vez — se responde "duplicado" sin gastar rate limit.
-    const hash = hashDe(estado);
-    if (hash === ultimoHash && ahora - ultimoHashTs < 3000) {
-      return res.status(200).json({ ok: true, duplicado: true });
-    }
+  // ---------- Reproducción (se vincula al guild por el token) ----------
 
-    // Rate limit global blando: máx. 1 POST útil por segundo (payloads nuevos)
-    const ip = req.ip ?? "desconocida";
-    const anterior = intervaloRateLimit.get(ip) ?? 0;
-    if (ahora - anterior < 1000) return res.status(429).json({ ok: false, error: "rate limit" });
-    intervaloRateLimit.set(ip, ahora);
+  app.post("/api/djinni/play", (req, res) => {
+    const guildId = guildDeToken(req);
+    const { id } = req.body ?? {};
+    const cancion = id ? getCancionMenu(Number(id)) : null;
+    if (!guildId) return res.status(401).json({ ok: false, error: "Panel no vinculado a un servidor. Usa /djinni vincular." });
+    if (!cancion) return res.status(404).json({ ok: false, error: "Canción no encontrada en el menú." });
 
-    ultimoHash = hash;
-    ultimoHashTs = ahora;
-
-    res.status(202).json({ ok: true });
-    // Asíncrono: no bloqueamos la respuesta con arranques de tuberías
     setImmediate(() => {
-      try {
-        aplicarEstadoDjinniGlobal(estado);
-      } catch (error) {
-        console.error("🎵 Error aplicando estado Djinni:", error);
-      }
+      reproducirConSesion(req, res, guildId, cancion);
     });
   });
 
-  // Estáticos del fork compilado (Owlbear carga manifest.json desde aquí)
+  app.post("/api/djinni/stop", (req, res) => {
+    const guildId = guildDeToken(req);
+    if (!guildId) return res.status(401).json({ ok: false, error: "Panel no vinculado a un servidor. Usa /djinni vincular." });
+    const parada = pararCancionMenu(guildId);
+    res.json({ ok: true, parada });
+  });
+
+  app.get("/api/djinni/estado", (req, res) => {
+    const guildId = guildDeToken(req);
+    if (!guildId) return res.status(401).json({ ok: false, error: "Panel no vinculado a un servidor. Usa /djinni vincular." });
+    res.json({ ok: true, ...estadoCancionMenu(guildId) });
+  });
+
+  // Estáticos del panel compilado (Owlbear carga manifest.json desde aquí)
   if (existsSync(resolve(DJINNI_DIR))) {
     app.use(express.static(resolve(DJINNI_DIR)));
   }
@@ -137,24 +255,24 @@ export function crearAppDjinni() {
     else next();
   });
 
-  // 404 para lo demás (incluye slugs equivocados: no revelamos el bueno)
+  // 404 para lo demás
   app.use((_req, res) => res.status(404).send("Nada por aquí."));
 
   return app;
 }
 
-export function iniciarPuenteDjinni({ puerto = DJINNI_PORT } = {}) {
-  if (!puerto || !DJINNI_SLUG) {
+export function iniciarPuenteDjinni(client) {
+  if (!DJINNI_PORT || !process.env.DJINNI_SLUG) {
     console.log("🎵 Servidor unificado desactivado (define DJINNI_PORT y DJINNI_SLUG en .env).");
     return null;
   }
+  clienteActual = client;
   const app = crearAppDjinni();
-  const servidor = app.listen(puerto, () => {
+  const servidor = app.listen(DJINNI_PORT, () => {
     servidorActivo = servidor;
-    const real = servidor.address().port;
-    console.log(`🎵 Servidor unificado (música + OAuth Twitch) escuchando en localhost:${real} ✓`);
+    console.log(`🎵 Servidor unificado (menú Djinni + OAuth Twitch) escuchando en localhost:${DJINNI_PORT} ✓`);
     if (!existsSync(resolve(DJINNI_DIR))) {
-      console.warn(`🎵 Aviso: ${DJINNI_DIR} no existe (compila el fork de Djinni y súbelo a la Pi para servir el manifest).`);
+      console.warn(`🎵 Aviso: ${DJINNI_DIR} no existe (compila el panel de Djinni y súbelo a la Pi para servir el manifest).`);
     }
   });
   return servidor;

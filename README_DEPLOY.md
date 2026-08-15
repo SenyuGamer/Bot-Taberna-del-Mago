@@ -246,10 +246,10 @@ ssh orangepi@192.168.68.110 "sudo rm -rf /opt/taberna-mago/src/djinni/build && s
 **Uso por sesión:**
 
 ```
-/syncmusic unir      → el bot se conecta al canal donde esté el DM
+/musica unir      → el bot se conecta al canal donde esté el DM
 DM usa Djinni normal → suena en la llamada (cambios de pista, pausa, volúmenes)
 /musica url <youtube>[loop][volumen]   → pinchar algo sin Owlbear
-/syncmusic parar     → silencio y desconexión (si el canal se queda vacío, se retira solo a los 5 min)
+/musica parar     → silencio y desconexión (si el canal se queda vacío, se retira solo a los 5 min)
 ```
 
 **Notas de diseño (v1):** fuentes = lo que entienda yt-dlp (YouTube incluido); un canal de voz por servidor (limitación de Discord); loops "aleatorios" de Djinni se aproximan con retardo aleatorio equivalente; fades personalizados y seek-sync fino quedan para v2; el endpoint usa slug+rate limit+dedup (apto para túnel público del grupo privado). Health check: `curl https://owltwitch.cobaltcatstudios.com/health`.
