@@ -94,8 +94,20 @@ export async function unir(guild, canal, clientId) {
   player.play(recurso);
   connection.subscribe(player);
 
+  // Diagnóstico: transiciones del reproductor (idle -> playing -> idle).
+  player.on("stateChange", (viejo, nuevo) => {
+    console.log(`🎵 Reproductor (${guild.name}): ${viejo.status} -> ${nuevo.status}`);
+  });
   connection.on("stateChange", (_viejo, nuevo) => {
     console.log(`🎵 Voz (${guild.name}): ${nuevo.status}`);
+    if (nuevo.status === VoiceConnectionStatus.Destroyed) {
+      // La conexión se cayó/cerró: eliminamos la sesión para que el próximo
+      // play cree una nueva (evita quedarse con una sesión muerta y muda).
+      if (sesiones.get(guild.id) === sesion) {
+        console.log(`🎵 Voz (${guild.name}): conexión destruida; limpiando sesión.`);
+        parar(guild.id);
+      }
+    }
   });
   connection.on("error", (error) => {
     console.error(`🎵 Error de conexión de voz en ${guild.name}:`, error.message, error);
@@ -114,6 +126,8 @@ export async function unir(guild, canal, clientId) {
     player,
     mixer,
     recurso,
+    ffEnc,
+    recargasEncoder: 0,
     fuentes: new Map(), // id -> {id, url, tipo, loop, volumen, userId, pipeline}
     temporizadorVacio: null,
     crossfadeTimer: null,
@@ -122,6 +136,30 @@ export async function unir(guild, canal, clientId) {
   };
   sesiones.set(guild.id, sesion);
   setCanalDjgambit(guild.id, canal.id);
+
+  // Auto-reparación: si el encoder opus muere (p. ej. "Broken pipe"), lo recargamos
+  // sin descolgar la conexión para que la música vuelva sola.
+  ffEnc.on("close", (code) => {
+    if (sesiones.get(guild.id) !== sesion) return; // sesión ya cerrada (parar)
+    if (code === 0) return; // cierre limpio (p. ej. al detener)
+    if (sesion.recargasEncoder >= 5) {
+      console.error(`🎵 Encoder opus se cerró ${sesion.recargasEncoder} veces; parando sesión de ${guild.name}.`);
+      parar(guild.id);
+      return;
+    }
+    sesion.recargasEncoder++;
+    console.log(`🎵 Encoder opus terminó (código ${code}); recargando encoder (${sesion.recargasEncoder}).`);
+    const ff2 = crearEncoderOpus({ onError: (e) => console.error(`🎵 ${e.message}`) });
+    sesion.ffEnc = ff2;
+    try { mixer.salida.pipe(ff2.stdin); } catch {}
+    const recurso2 = createAudioResource(ff2.stdout, { inputType: StreamType.OggOpus });
+    sesion.recurso = recurso2;
+    try {
+      player.play(recurso2);
+    } catch (e) {
+      console.error("🎵 No pude reiniciar el reproductor:", e.message);
+    }
+  });
 
   try {
     await entersState(connection, VoiceConnectionStatus.Ready, 20_000);
