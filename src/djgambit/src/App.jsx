@@ -54,6 +54,14 @@ function formatearBytes(n) {
   return `${(n / 1048576).toFixed(1)} MB`;
 }
 
+// Añade https:// si al pegar la URL falta el esquema (p. ej. "youtube.com/...").
+function normalizarUrl(url) {
+  const u = String(url ?? "").trim();
+  if (/^https?:\/\//i.test(u)) return u;
+  if (/^[\w-]+(\.[\w-]+)+/.test(u)) return `https://${u}`;
+  return u;
+}
+
 export default function App() {
   const [estado, setEstado] = useState(ESTADOS.CARGANDO);
   const [token, setToken] = useState(() => localStorage.getItem("djgambit_token") || "");
@@ -76,6 +84,7 @@ export default function App() {
   const [cats, setCats] = useState(() => JSON.parse(localStorage.getItem("djgambit_cats") || "{}")); // categoria -> bool (playlist)
   const [mostrarEmojis, setMostrarEmojis] = useState(false);
   const [arrastrando, setArrastrando] = useState(null); // { cat, id }
+  const [destacadaId, setDestacadaId] = useState(null); // canción recién añadida (para resaltarla)
 
   const ultimoJson = useRef("");
   const volumenAjustando = useRef(false);
@@ -349,20 +358,29 @@ export default function App() {
   async function guardar() {
     setError("");
     setMensaje("");
-    if (!nueva.nombre.trim() || !/^https?:\/\//i.test(nueva.url)) {
-      setError("Escribe un nombre y una URL de YouTube válida.");
+    const urlOk = normalizarUrl(nueva.url);
+    if (!nueva.nombre.trim() || !/^https?:\/\//i.test(urlOk)) {
+      setError("Escribe un nombre y una URL de YouTube válida (p. ej. https://www.youtube.com/watch?v=...).");
       return;
     }
     try {
+      let idNuevo = null;
       if (editando) {
-        await api(token)(`/api/djgambit/menu/${editando.id}`, { method: "PATCH", body: JSON.stringify(nueva) });
+        await api(token)(`/api/djgambit/menu/${editando.id}`, { method: "PATCH", body: JSON.stringify({ ...nueva, url: urlOk }) });
         setMensaje("✓ Canción actualizada");
       } else {
-        await api(token)("/api/djgambit/menu", { method: "POST", body: JSON.stringify(nueva) });
+        const d = await api(token)("/api/djgambit/menu", { method: "POST", body: JSON.stringify({ ...nueva, url: urlOk }) });
+        idNuevo = d.cancion?.id ?? null;
         setMensaje("✓ Canción añadida");
       }
       cancelarForm();
       await sincronizar();
+      if (idNuevo != null) {
+        // Resalta y desplaza hasta la canción recién añadida.
+        setDestacadaId(idNuevo);
+        setTimeout(() => document.getElementById(`carta-${idNuevo}`)?.scrollIntoView({ behavior: "smooth", block: "nearest" }), 200);
+        setTimeout(() => setDestacadaId((prev) => (prev === idNuevo ? null : prev)), 3000);
+      }
     } catch (e) {
       setError(e.message);
     }
@@ -553,11 +571,12 @@ export default function App() {
                   return (
                     <div
                       key={c.id}
+                      id={`carta-${c.id}`}
                       draggable
                       onDragStart={() => onDragStart(g.cat, c.id)}
                       onDragOver={onDragOver}
                       onDrop={() => onDrop(g.cat, c.id)}
-                      className={`escena ${cargandoId === c.id ? "escena-cargando" : ""} ${esSonando(c) ? "escena-sonando" : ""} ${arrastrando?.id === c.id ? "escena-arrastrando" : ""}`}
+                      className={`escena ${cargandoId === c.id ? "escena-cargando" : ""} ${esSonando(c) ? "escena-sonando" : ""} ${arrastrando?.id === c.id ? "escena-arrastrando" : ""} ${destacadaId === c.id ? "escena-destacada" : ""}`}
                     >
                       <button
                         className="escena-btn"

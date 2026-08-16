@@ -115,6 +115,14 @@ function leerToken(req) {
   return m ? m[1] : null;
 }
 
+/** Añade https:// si falta el esquema al pegar la URL (p. ej. "youtube.com/..."). */
+function normalizarUrl(url) {
+  const u = String(url ?? "").trim();
+  if (/^https?:\/\//i.test(u)) return u;
+  if (/^[\w-]+(\.[\w-]+)+/.test(u)) return `https://${u}`;
+  return u;
+}
+
 /** Devuelve el guildId vinculado al token del panel, o null. */
 function guildDeToken(req) {
   const token = leerToken(req);
@@ -223,11 +231,12 @@ export function crearAppDjgambit() {
     res.json({ ok: true, canciones });
   });
 
-  app.post("/api/djgambit/menu", (req, res) => {
+app.post("/api/djgambit/menu", (req, res) => {
     if (!guildDeToken(req)) return res.status(401).json({ ok: false, error: "Panel no vinculado. Usa /musica vincular." });
-    const { nombre, icono = "", url = "", categoria = "" } = req.body ?? {};
+    const { nombre, icono = "", categoria = "" } = req.body ?? {};
+    const url = normalizarUrl(req.body?.url ?? "");
     if (!nombre?.trim() || !/^https?:\/\//i.test(url)) {
-      return res.status(400).json({ ok: false, error: "Nombre y URL vÃ¡lida son obligatorios." });
+      return res.status(400).json({ ok: false, error: "Nombre y URL válida son obligatorios." });
     }
     const cancion = agregarCancionMenu({ nombre: nombre.trim(), icono: String(icono), url, categoria: String(categoria) });
     console.log(`ðŸŽµ CanciÃ³n aÃ±adida al menÃº: ${cancion.nombre} <${url}>`);
@@ -259,8 +268,9 @@ app.delete("/api/djgambit/menu/:id", (req, res) => {
     const id = Number(req.params.id);
     const actual = getCancionMenu(id);
     if (!actual) return res.status(404).json({ ok: false, error: "Canción no encontrada." });
-    const { nombre, icono, url, categoria, loop } = req.body ?? {};
-    const nuevaUrl = typeof url === "string" && /^https?:\/\//i.test(url.trim()) ? url.trim() : actual.url;
+    const { nombre, icono, categoria, loop } = req.body ?? {};
+    const urlEntrante = normalizarUrl(req.body?.url);
+    const nuevaUrl = /^https?:\/\//i.test(urlEntrante) ? urlEntrante : actual.url;
     const nueva = actualizarCancionMenu(id, {
       nombre: typeof nombre === "string" && nombre.trim() ? nombre.trim() : actual.nombre,
       icono: typeof icono === "string" ? icono : actual.icono,
