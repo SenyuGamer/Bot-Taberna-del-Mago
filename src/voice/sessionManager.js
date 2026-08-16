@@ -69,8 +69,20 @@ export function listarSesiones() {
   return [...sesiones.entries()].map(([guildId, s]) => ({ guildId, canalId: s.canalId, fuentes: s.fuentes.size, pausado: s.mixer?.pausado ?? false }));
 }
 
-/** Une (o mueve) el bot al canal de voz indicado y crea la sesión. */
-export async function unir(guild, canal, clientId) {
+/**
+ * Une (o mueve) el bot al canal de voz indicado y crea la sesión.
+ * `usuarioId`/`usuarioNombre`: quien reclama el control del menú. Si otro DM
+ * está sonando, se rechaza (veto). Con `{ sinControl: true }` (reconexión
+ * automática) se omite el veto y se conserva el control previo.
+ */
+export async function unir(guild, canal, clientId, usuarioId = null, usuarioNombre = "", { sinControl = false } = {}) {
+  const previa = sesiones.get(guild.id);
+  if (!sinControl && previa && previa.controlUserId && previa.controlUserId !== usuarioId) {
+    const enUso = previa.fuentes.has("menu:activa") || previa.fuentes.has("menu:transicion") || !!previa.menuPlaylist;
+    if (enUso) {
+      throw new Error(`La música la controla ${previa.controlNombre || `<@${previa.controlUserId}>`}. Espera a que la pare para mover el bot.`);
+    }
+  }
   parar(guild.id); // limpieza si había una sesión previa
 
   const perms = canal.permissionsFor(clientId);
@@ -141,6 +153,8 @@ export async function unir(guild, canal, clientId) {
     clientId, // para reconectar tras una caída
     reconexiones: 0,
     ultimaCaida: null,
+    controlUserId: null, // DM que controla el menú (quien reprodujo/unió por última vez)
+    controlNombre: null,
     connection,
     player,
     mixer,
@@ -153,6 +167,13 @@ export async function unir(guild, canal, clientId) {
     menuPlaylist: null, // { categoria, canciones, indice } — playlist por categoría activa
     timeline: null, // { nombre, inicioEn, duracionMs } de la canción del menú sonando
   };
+  if (!sinControl && usuarioId) {
+    sesion.controlUserId = usuarioId;
+    sesion.controlNombre = usuarioNombre || null;
+  } else if (previa?.controlUserId) {
+    sesion.controlUserId = previa.controlUserId;
+    sesion.controlNombre = previa.controlNombre;
+  }
   sesiones.set(guild.id, sesion);
   setCanalDjgambit(guild.id, canal.id);
 
@@ -255,7 +276,7 @@ async function _reconectarSesion(sesion) {
   parar(sesion.guildId); // limpia la sesión caída (evita bucles por Destroyed)
 
   try {
-    const nueva = await unir(guild, canal, clientId);
+    const nueva = await unir(guild, canal, clientId, null, "", { sinControl: true });
     nueva.reconexiones = reconexiones;
     nueva.ultimaCaida = ultimaCaida;
     if (activa) {
@@ -353,6 +374,24 @@ export function quitarFuentesManuales(guildId, { soloDe = null } = {}) {
   return quitadas;
 }
 
+// ---------- Control por turnos del menú (varios DMs pueden vincular) ----------
+
+/**
+ * Devuelve un mensaje de veto si otro DM está sonando el menú, o null si está
+ * libre (o lo controla el propio `usuarioId`). El control lo toma quien
+ * reproduce/une por última vez y se libera al parar.
+ */
+function _revisarControl(s, usuarioId) {
+  if (!s) return null;
+  const enUso = s.fuentes.has("menu:activa") || s.fuentes.has("menu:transicion") || !!s.menuPlaylist;
+  if (!enUso || !s.controlUserId || s.controlUserId === usuarioId) return null;
+  return `La música la controla ${s.controlNombre || `<@${s.controlUserId}>`}. Espera a que la pare para reproducir.`;
+}
+
+export function revisarControl(guildId, usuarioId) {
+  return _revisarControl(sesiones.get(guildId), usuarioId);
+}
+
 // ---------- Menú de canciones del DM (panel Owlbear → bot) ----------
 
 /**
@@ -361,10 +400,13 @@ export function quitarFuentesManuales(guildId, { soloDe = null } = {}) {
  */
 const PASOS_CROSSFADE = 20;
 
-export function reproducirCancionMenu(guildId, { id = null, url, nombre = "", loop = false, crossfadeMs = 0 }) {
+export function reproducirCancionMenu(guildId, { id = null, url, nombre = "", loop = false, crossfadeMs = 0, usuarioId = null, usuarioNombre = "" }) {
   const s = sesiones.get(guildId);
   if (!s) return null;
+  const bloqueo = _revisarControl(s, usuarioId);
+  if (bloqueo) return { error: bloqueo };
   s.menuPlaylist = null; // una reproducción manual cancela el modo lista (playlist por categoría)
+  if (usuarioId) { s.controlUserId = usuarioId; s.controlNombre = usuarioNombre || null; }
   return _ponerCancionActiva(s, { id, url, nombre, loop }, crossfadeMs);
 }
 
@@ -401,6 +443,8 @@ function _ponerCancionActiva(s, { id, url, nombre, loop }, crossfadeMs) {
         if (!loop) {
           if (!s.menuPlaylist) { s.timeline = null; onCambioSonando?.(null); }
           _avanzarPlaylistPorFin(s.guildId);
+          // La canción acabó y no hay playlist: el control del menú queda libre.
+          if (!s.menuPlaylist) { s.controlUserId = null; s.controlNombre = null; }
         }
       },
       onError: (e) => console.error(`🎵 Canción del menú falló:`, e.message),
@@ -464,9 +508,11 @@ function _ponerCancionActiva(s, { id, url, nombre, loop }, crossfadeMs) {
  * Reproduce la categoría como una lista de reproducción (bucle al terminar):
  * cuando una canción de la categoría acaba, suena la siguiente en orden (por id).
  */
-export function reproducirPlaylistCategoria(guildId, { categoria = "", canciones = [], inicioId = null }) {
+export function reproducirPlaylistCategoria(guildId, { categoria = "", canciones = [], inicioId = null, usuarioId = null, usuarioNombre = "" }) {
   const s = sesiones.get(guildId);
   if (!s || canciones.length === 0) return null;
+  const bloqueo = _revisarControl(s, usuarioId);
+  if (bloqueo) return { error: bloqueo };
   if (s.fuentes.has("menu:transicion")) {
     _quitarFuenteDeSesion(s, "menu:transicion");
     if (s.crossfadeTimer) { clearInterval(s.crossfadeTimer); s.crossfadeTimer = null; }
@@ -477,6 +523,7 @@ export function reproducirPlaylistCategoria(guildId, { categoria = "", canciones
     idx = hallado >= 0 ? hallado : 0;
   }
   s.menuPlaylist = { categoria, canciones, indice: idx };
+  if (usuarioId) { s.controlUserId = usuarioId; s.controlNombre = usuarioNombre || null; }
   const primera = canciones[idx];
   return _ponerCancionActiva(s, { id: primera.id, url: primera.url, nombre: primera.nombre, loop: false }, 0);
 }
@@ -499,6 +546,8 @@ export function pararCancionMenu(guildId) {
   if (s.crossfadeTimer) { clearInterval(s.crossfadeTimer); s.crossfadeTimer = null; }
   s.menuPlaylist = null;
   s.timeline = null;
+  s.controlUserId = null;
+  s.controlNombre = null;
   onCambioSonando?.(null);
   let quitada = false;
   for (const id of ["menu:activa", "menu:transicion"]) {

@@ -109,7 +109,7 @@ export const musica = {
           flags: MessageFlags.Ephemeral,
         });
       }
-      const codigo = generarCodigoVinculacion(interaction.guildId);
+      const codigo = generarCodigoVinculacion(interaction.guildId, interaction.user.id);
       return interaction.reply({
         embeds: [
           embed(
@@ -117,7 +117,8 @@ export const musica = {
             `🧞 **Código de verificación**\n\n` +
             `**\`${codigo}\`** *(válido 10 minutos, uso único)*\n\n` +
             `Ábrelo en el panel DJGAMBIT dentro de Owlbear y pega el código para vincular la página a **${interaction.guild.name}**. ` +
-            `Cuando pulses una canción ahí, sonará en el canal que hayas conectado con \`/musica unir\`.`,
+            `Cuando pulses una canción ahí, sonará en el canal que hayas conectado con \`/musica unir\`.\n\n` +
+            `*Varios DMs pueden vincular su propio panel. El control de la música lo tiene quien reproduzca o conecte el bot por última vez; cuando pare, otro puede tomarlo.*`,
             `${EMOJI} Vincular panel DJGAMBIT`
           ),
         ],
@@ -144,7 +145,7 @@ export const musica = {
 
       await interaction.deferReply();
       try {
-        await unir(interaction.guild, canal, interaction.client.user.id);
+        await unir(interaction.guild, canal, interaction.client.user.id, interaction.user.id, interaction.member?.displayName ?? interaction.user.username);
       } catch (error) {
         return interaction.editReply({ embeds: [embedError(error.message)] });
       }

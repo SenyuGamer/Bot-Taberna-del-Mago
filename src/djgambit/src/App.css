@@ -190,6 +190,7 @@
 
 .ok { color: #7edc9a; font-size: 13px; }
 .error { color: #ff7070; font-size: 13px; }
+.aviso-control { color: #ffd479; font-size: 13px; }
 
 .cache-aviso {
   display: inline-flex;

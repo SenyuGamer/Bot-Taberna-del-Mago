@@ -223,24 +223,40 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS djgambit_links (
     token      TEXT PRIMARY KEY,
     guild_id   TEXT NOT NULL,
+    dm_id      TEXT NOT NULL DEFAULT '',
     updated_at TEXT NOT NULL
   )
 `);
 
-const getLinkStmt = db.prepare("SELECT guild_id FROM djgambit_links WHERE token = ?");
-const setLinkStmt = db.prepare(`
-  INSERT INTO djgambit_links (token, guild_id, updated_at)
-  VALUES (?, ?, ?)
-  ON CONFLICT (token) DO UPDATE SET guild_id = excluded.guild_id, updated_at = excluded.updated_at
+// Migración: identidad del DM que vinculó el panel (para el control por turnos).
+try {
+  db.exec("ALTER TABLE djgambit_links ADD COLUMN dm_id TEXT NOT NULL DEFAULT ''");
+} catch {}
+
+const getVinculoStmt = db.prepare("SELECT guild_id, dm_id FROM djgambit_links WHERE token = ?");
+const setVinculoStmt = db.prepare(`
+  INSERT INTO djgambit_links (token, guild_id, dm_id, updated_at)
+  VALUES (?, ?, ?, ?)
+  ON CONFLICT (token) DO UPDATE SET guild_id = excluded.guild_id, dm_id = excluded.dm_id, updated_at = excluded.updated_at
 `);
+
+/** Devuelve el vínculo de un token del panel: { guildId, dmId } o null. */
+export function getVinculo(token) {
+  const row = getVinculoStmt.get(token);
+  return row ? { guildId: row.guild_id, dmId: row.dm_id ?? "" } : null;
+}
+
+/** Vincula un token del panel Owlbear a un guild y a la identidad del DM que lo generó. */
+export function setVinculo(token, guildId, dmId = "") {
+  setVinculoStmt.run(token, guildId, dmId ?? "", new Date().toISOString());
+}
 
 /** Devuelve el guild_id vinculado a un token del panel, o null. */
 export function getGuildPorToken(token) {
-  const row = getLinkStmt.get(token);
-  return row ? row.guild_id : null;
+  return getVinculo(token)?.guildId ?? null;
 }
 
 /** Vincula un token del panel Owlbear a un guild de Discord. */
 export function setGuildPorToken(token, guildId) {
-  setLinkStmt.run(token, guildId, new Date().toISOString());
+  setVinculo(token, guildId, "");
 }

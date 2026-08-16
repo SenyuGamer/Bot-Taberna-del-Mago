@@ -85,6 +85,7 @@ export default function App() {
   const [mostrarEmojis, setMostrarEmojis] = useState(false);
   const [arrastrando, setArrastrando] = useState(null); // { cat, id }
   const [destacadaId, setDestacadaId] = useState(null); // canción recién añadida (para resaltarla)
+  const [controlInfo, setControlInfo] = useState(null); // { userId, nombre, eresTu } — quién controla la música
 
   const ultimoJson = useRef("");
   const volumenAjustando = useRef(false);
@@ -105,6 +106,7 @@ export default function App() {
         cache: est?.cache ?? null,
         cacheando: est?.cacheando ?? [],
         vol: est?.volumen ?? 100,
+        control: est?.control ?? null,
       });
       if (sig !== ultimoJson.current) {
         ultimoJson.current = sig;
@@ -112,6 +114,7 @@ export default function App() {
         if (est) {
           setSonando(est.sonando ? { id: est.cancionId, nombre: est.nombre, inicioEn: est.inicioEn, duracionMs: est.duracionMs } : null);
           setCacheInfo({ ...(est.cache ?? {}), cacheando: (est.cacheando ?? []).length });
+          setControlInfo(est.control ?? null);
           if (!volumenAjustando.current) setVolumen(est.volumen ?? 100);
         }
       }
@@ -576,6 +579,11 @@ export default function App() {
       </div>
 
       <div className="mensajes">
+        {controlInfo && !controlInfo.eresTu && (
+          <span className="aviso-control" title="El control lo toma quien reproduzca o conecte el bot por última vez; se libera al parar.">
+            🔒 La música la controla {controlInfo.nombre || controlInfo.userId}
+          </span>
+        )}
         {cacheEnCurso.length > 0 && (
           <span className="ok cache-aviso"><span className="spinner spinner-mini" /> Guardando en caché: {cacheEnCurso.map((c) => c.nombre).join(", ")}…</span>
         )}

@@ -6,13 +6,13 @@ import {
   agregarCancionMenu,
   borrarCancionMenu,
   getCancionMenu,
-  getGuildPorToken,
+  getVinculo,
   listarCancionesMenu,
-  setGuildPorToken,
+  setVinculo,
   actualizarCancionMenu,
   setOrdenCancionesMenu,
 } from "./db.js";
-import { reproducirCancionMenu, reproducirPlaylistCategoria, pararCancionMenu, estadoCancionMenu, getSesion, unir, canalGuardado, setOnCambioSonando } from "./voice/sessionManager.js";
+import { reproducirCancionMenu, reproducirPlaylistCategoria, pararCancionMenu, estadoCancionMenu, getSesion, unir, canalGuardado, revisarControl, setOnCambioSonando } from "./voice/sessionManager.js";
 import { precargarCache, existeCache, borrarCache, estadoCache, vaciarCache, podarCache } from "./voice/pipeline.js";
 
 // Precargas en curso por URL (evita descargar la misma canciÃ³n dos veces a la vez).
@@ -94,9 +94,9 @@ export function registrarRutaTemporal(path, { timeoutMs = 5 * 60_000, manejador 
 
 /**
  * Genera un cÃ³digo de verificaciÃ³n de un solo uso para vincular el panel a un
- * servidor de Discord. Lo crea el comando /musica vincular.
+ * servidor de Discord y a la identidad del DM que lo pide. Lo crea /musica vincular.
  */
-export function generarCodigoVinculacion(guildId) {
+export function generarCodigoVinculacion(guildId, dmId) {
   // Limpia cÃ³digos caducados de la misma guild
   for (const [codigo, info] of codigos) {
     if (info.guildId === guildId && info.expira < Date.now()) codigos.delete(codigo);
@@ -105,7 +105,7 @@ export function generarCodigoVinculacion(guildId) {
   do {
     codigo = randomInt(100000, 999999).toString();
   } while (codigos.has(codigo));
-  codigos.set(codigo, { guildId, expira: Date.now() + TTL_CODIGO_MS });
+  codigos.set(codigo, { guildId, dmId, expira: Date.now() + TTL_CODIGO_MS });
   return codigo;
 }
 
@@ -126,14 +126,23 @@ function normalizarUrl(url) {
 /** Devuelve el guildId vinculado al token del panel, o null. */
 function guildDeToken(req) {
   const token = leerToken(req);
-  return token ? getGuildPorToken(token) : null;
+  return token ? getVinculo(token)?.guildId ?? null : null;
+}
+
+/** Devuelve el dm_id (usuario de Discord) que vinculó el panel, o null. */
+function dmDeToken(req) {
+  const token = leerToken(req);
+  return token ? getVinculo(token)?.dmId ?? null : null;
 }
 
 /**
- * Reprocha una canciÃ³n del menÃº en el guild vinculado. Si el bot no estÃ¡ en el
+ * Reproduce una canción del menú en el guild vinculado. Si el bot no está en el
  * canal de voz, intenta unirse al que haya guardado (/musica unir anterior).
  */
-async function reproducirConSesion(req, res, guildId, cancion, crossfadeMs = 0, loop = false, loopCategoria = false) {
+async function reproducirConSesion(req, res, guildId, cancion, crossfadeMs = 0, loop = false, loopCategoria = false, dmId = null, dmNombre = "") {
+  const bloqueo = revisarControl(guildId, dmId);
+  if (bloqueo) return res.status(409).json({ ok: false, error: bloqueo });
+
   let sesion = getSesion(guildId);
   let canalId = sesion?.canalId ?? canalGuardado(guildId);
 
@@ -142,9 +151,9 @@ async function reproducirConSesion(req, res, guildId, cancion, crossfadeMs = 0, 
     const canal = guild?.channels.cache.get(canalId);
     if (guild && canal?.isVoiceBased?.()) {
       try {
-        sesion = await unir(guild, canal, clienteActual.user.id);
+        sesion = await unir(guild, canal, clienteActual.user.id, dmId, dmNombre);
       } catch (error) {
-        console.error(`ðŸŽµ No pude unir el bot para el menÃº en ${guildId}:`, error.message);
+        console.error(`🎵 No pude unir el bot para el menú en ${guildId}:`, error.message);
       }
     }
   }
@@ -152,7 +161,7 @@ async function reproducirConSesion(req, res, guildId, cancion, crossfadeMs = 0, 
   if (!getSesion(guildId)) {
     return res.status(409).json({
       ok: false,
-      error: "El bot no estÃ¡ en un canal de voz. Conecta el bot con /musica unir y vuelve a pulsar.",
+      error: "El bot no está en un canal de voz. Conecta el bot con /musica unir y vuelve a pulsar.",
     });
   }
 
@@ -165,6 +174,8 @@ async function reproducirConSesion(req, res, guildId, cancion, crossfadeMs = 0, 
         categoria: cancion.categoria,
         canciones,
         inicioId: cancion.id,
+        usuarioId: dmId,
+        usuarioNombre: dmNombre,
       });
     } else {
       creado = reproducirCancionMenu(guildId, {
@@ -173,14 +184,17 @@ async function reproducirConSesion(req, res, guildId, cancion, crossfadeMs = 0, 
         nombre: cancion.nombre,
         loop,
         crossfadeMs,
+        usuarioId: dmId,
+        usuarioNombre: dmNombre,
       });
     }
-    if (!creado) return res.status(409).json({ ok: false, error: "No hay sesiÃ³n de voz activa." });
+    if (!creado) return res.status(409).json({ ok: false, error: "No hay sesión de voz activa." });
+    if (creado.error) return res.status(409).json({ ok: false, error: creado.error });
     await creado.promesa;
     res.json({ ok: true, cancion: { id: cancion.id, nombre: cancion.nombre, url: cancion.url } });
   } catch (error) {
-    console.error(`ðŸŽµ Error reproduciendo ${cancion.nombre}:`, error.message);
-    res.status(502).json({ ok: false, error: `No pude reproducir esa canciÃ³n: ${error.message}` });
+    console.error(`🎵 Error reproduciendo ${cancion.nombre}:`, error.message);
+    res.status(502).json({ ok: false, error: `No pude reproducir esa canción: ${error.message}` });
   }
 }
 
@@ -215,7 +229,7 @@ export function crearAppDjgambit() {
     }
     codigos.delete(codigo); // un solo uso
     const token = randomBytes(24).toString("hex");
-    setGuildPorToken(token, info.guildId);
+    setVinculo(token, info.guildId, info.dmId ?? "");
     const guild = clienteActual?.guilds.cache.get(info.guildId);
     res.json({ ok: true, token, guildId: info.guildId, guildName: guild?.name ?? "" });
   });
@@ -359,28 +373,39 @@ app.delete("/api/djgambit/menu/:id", (req, res) => {
 
   app.post("/api/djgambit/play", (req, res) => {
     const guildId = guildDeToken(req);
+    const dmId = dmDeToken(req);
+    if (!guildId) return res.status(401).json({ ok: false, error: "Panel no vinculado a un servidor. Usa /musica vincular." });
     const { id, crossfade = 0, loop = false, loopCategoria = false } = req.body ?? {};
     const cancion = id ? getCancionMenu(Number(id)) : null;
-    if (!guildId) return res.status(401).json({ ok: false, error: "Panel no vinculado a un servidor. Usa /musica vincular." });
-    if (!cancion) return res.status(404).json({ ok: false, error: "CanciÃ³n no encontrada en el menÃº." });
+    if (!cancion) return res.status(404).json({ ok: false, error: "Canción no encontrada en el menú." });
+
+    const dmNombre = dmId ? (clienteActual?.guilds?.cache?.get(guildId)?.members?.cache?.get(dmId)?.displayName ?? "") : "";
 
     setImmediate(() => {
       const ms = Number(crossfade) > 0 ? Number(crossfade) * 1000 : 0;
-      reproducirConSesion(req, res, guildId, cancion, ms, !!loop, !!loopCategoria);
+      reproducirConSesion(req, res, guildId, cancion, ms, !!loop, !!loopCategoria, dmId, dmNombre);
     });
   });
 
   app.post("/api/djgambit/stop", (req, res) => {
     const guildId = guildDeToken(req);
+    const dmId = dmDeToken(req);
     if (!guildId) return res.status(401).json({ ok: false, error: "Panel no vinculado a un servidor. Usa /musica vincular." });
+    const bloqueo = revisarControl(guildId, dmId);
+    if (bloqueo) return res.status(409).json({ ok: false, error: bloqueo });
     const parada = pararCancionMenu(guildId);
     res.json({ ok: true, parada });
   });
 
   app.get("/api/djgambit/estado", (req, res) => {
     const guildId = guildDeToken(req);
+    const dmId = dmDeToken(req);
     if (!guildId) return res.status(401).json({ ok: false, error: "Panel no vinculado a un servidor. Usa /musica vincular." });
     const estado = estadoCancionMenu(guildId);
+    const sesion = getSesion(guildId);
+    const control = sesion?.controlUserId
+      ? { userId: sesion.controlUserId, nombre: sesion.controlNombre || "", eresTu: dmId === sesion.controlUserId }
+      : null;
     let cache;
     try {
       cache = estadoCache({ urls: listarCancionesMenu().map((c) => c.url) });
@@ -388,14 +413,17 @@ app.delete("/api/djgambit/menu/:id", (req, res) => {
       console.log("⚠️ No se pudo medir la caché:", e.message);
       cache = { total: 0, tamañoBytes: 0, huerfanos: 0 };
     }
-    res.json({ ok: true, ...estado, cacheando: [...precargas.keys()], cache });
+    res.json({ ok: true, ...estado, control, cacheando: [...precargas.keys()], cache });
   });
 
   app.post("/api/djgambit/volumen", (req, res) => {
     const guildId = guildDeToken(req);
+    const dmId = dmDeToken(req);
     if (!guildId) return res.status(401).json({ ok: false, error: "Panel no vinculado a un servidor. Usa /musica vincular." });
     const v = Number(req.body?.v);
     if (!Number.isFinite(v) || v < 0 || v > 100) return res.status(400).json({ ok: false, error: "v debe estar entre 0 y 100." });
+    const bloqueo = revisarControl(guildId, dmId);
+    if (bloqueo) return res.status(409).json({ ok: false, error: bloqueo });
     const s = getSesion(guildId);
     if (!s) return res.status(409).json({ ok: false, error: "No hay sesión de voz activa.", volumen: 100 });
     s.mixer.setVolumenGlobal(v / 100);
