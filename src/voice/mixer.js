@@ -16,7 +16,7 @@ const CAP_HARD_FRAMES = 120; // tope duro de memoria; con backpressure no deber�
 const SILENCIO = Buffer.alloc(FRAME_BYTES);
 const MS_FRAME = 20; // duración de un frame
 const TICK_MS = 10; // granularidad del reloj (tick fino → emite 0, 1 o 2 frames)
-const BURST_MAX = 4; // máximo de frames por ciclo; si vamos atrás, re-anclamos
+const BURST_MAX = 25; // ráfaga máxima tras un atraso del event-loop (~500 ms); si vamos MÁS atrás, re-anclamos
 const LEAD_FRAMES = 5; // colchón de arranque: ~100 ms antes de consumir una fuente
 
 export function clampVolumen(v) {

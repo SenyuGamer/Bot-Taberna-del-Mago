@@ -90,10 +90,23 @@ export async function unir(guild, canal, clientId) {
     daveEncryption: true, // Discord exige DAVE (close 4017). En RISC-V se usa el build WASM de davey.
   });
 
-  const player = createAudioPlayer();
+  const player = createAudioPlayer({
+    behaviors: {
+      // Sin tope de frames perdidos: si el encoder se atasca un momento (RISC-V
+      // bajo carga), el reproductor emite SILENCIO y se recupera solo cuando el
+      // audio vuelve, en vez de entrar en idle y dejar la sesión muda.
+      maxMissedFrames: 2000, // ~40 s de tolerancia antes de rendirse
+    },
+  });
   const mixer = new Mixer();
   // Encodemos el PCM mezclado a ogg/opus con ffmpeg (RISC-V: opusscript crashea).
   const ffEnc = crearEncoderOpus({ onError: (e) => console.error(`🎵 ${e.message}`) });
+  // Diagnóstico: por qué se termina el flujo del encoder (stall vs. proceso muerto).
+  ffEnc.stdout.on("end", () => console.log(`🎵 Encoder stdout END (${guild.name})`));
+  ffEnc.stdout.on("close", () => console.log(`🎵 Encoder stdout CLOSE (${guild.name})`));
+  ffEnc.on("exit", (code, signal) => console.log(`🎵 Encoder proceso EXIT code=${code} signal=${signal} (${guild.name})`));
+  mixer.salida.on("end", () => console.log(`🎵 Mixer salida END (${guild.name})`));
+  mixer.salida.on("close", () => console.log(`🎵 Mixer salida CLOSE (${guild.name})`));
   mixer.salida.pipe(ffEnc.stdin);
   const recurso = createAudioResource(ffEnc.stdout, { inputType: StreamType.OggOpus });
   player.play(recurso);
