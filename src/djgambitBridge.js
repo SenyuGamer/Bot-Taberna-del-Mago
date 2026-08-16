@@ -449,7 +449,10 @@ export function iniciarPuenteDjgambit(client) {
   // Presencia del bot mientras suena una canción del menú.
   setOnCambioSonando((nombre) => {
     if (!clienteActual?.user) return;
-    clienteActual.user.setActivity(nombre ? `🔊 Sonando: ${nombre}` : null).catch(() => {});
+    try {
+      const p = clienteActual.user.setActivity(nombre ? `🔊 Sonando: ${nombre}` : null);
+      Promise.resolve(p)?.catch?.(() => {});
+    } catch {}
   });
   const app = crearAppDjgambit();
   const servidor = app.listen(DJGAMBIT_PORT, () => {

@@ -184,7 +184,7 @@ export function agregarFuente(guildId, { id, url, volumen = 1, loop = false, loo
     loop,
     loopDelayMs,
     onDatos: (bytes) => {
-      s.mixer.empujar(id, bytes);
+      return s.mixer.empujar(id, bytes); // false → el pipeline pausa su ffmpeg
     },
     onFin: () => {
       if (!loop) _quitarFuenteDeSesion(s, id);
@@ -195,6 +195,7 @@ export function agregarFuente(guildId, { id, url, volumen = 1, loop = false, loo
       onError?.(error);
     },
   });
+  s.mixer.setStockBajo(id, () => pipeline.reanudar());
 
   s.fuentes.set(id, { id, url, tipo, loop, volumen: clampVolumen(volumen), userId, nombre, cancionId, pipeline });
   pipeline.esperarPrimerAudio?.().then(resolvePrimer).catch(rejectPrimer);

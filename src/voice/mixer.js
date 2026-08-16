@@ -10,7 +10,9 @@ import { Readable } from "node:stream";
 // Si el event-loop se cuelga, re-anclamos el reloj a "ahora" (sin latencia acumulada).
 
 export const FRAME_BYTES = 960 * 2 * 2;
-const MAX_FRAMES_EN_COLA = 50; // ~1 segundo de cola por fuente
+const MAX_FRAMES_EN_COLA = 50; // ~1 segundo de cola por fuente (tope "suave": la tubería debe pausarse aquí)
+const MIN_FRAMES_EN_COLA = 25; // al bajar de aquí, se reanuda la tubería (histéresis)
+const CAP_HARD_FRAMES = 120; // tope duro de memoria; con backpressure no debería alcanzarse
 const SILENCIO = Buffer.alloc(FRAME_BYTES);
 const MS_FRAME = 20; // duración de un frame
 const TICK_MS = 10; // granularidad del reloj (tick fino → emite 0, 1 o 2 frames)
@@ -39,7 +41,7 @@ export class Mixer {
   }
 
   agregarFuente(id, volumen = 1) {
-    this.fuentes.set(id, { frames: [], resto: null, volumen: clampVolumen(volumen), recibido: false, arrancado: false });
+    this.fuentes.set(id, { frames: [], resto: null, volumen: clampVolumen(volumen), recibido: false, arrancado: false, onStockBajo: null });
   }
 
   quitarFuente(id) {
@@ -68,18 +70,31 @@ export class Mixer {
     this.pausado = !!pausado;
   }
 
-  /** Recibe bytes arbitrarios de la tubería y los trocea en frames de 20 ms. */
+  /**
+   * Recibe bytes arbitrarios de la tubería y los trocea en frames de 20 ms.
+   * Devuelve `true` si la tubería puede seguir descargando y `false` si la cola
+   * está llena (el pipeline debe PAUSAR su ffmpeg hasta que se consuma).
+   */
   empujar(id, bytes) {
     const fuente = this.fuentes.get(id);
-    if (!fuente || !bytes?.length) return;
+    if (!fuente || !bytes?.length) return true;
     fuente.recibido = true;
     fuente.resto = fuente.resto ? Buffer.concat([fuente.resto, bytes]) : bytes;
     while (fuente.resto.length >= FRAME_BYTES) {
       fuente.frames.push(fuente.resto.subarray(0, FRAME_BYTES));
       fuente.resto = fuente.resto.subarray(FRAME_BYTES);
     }
-    // Si la fuente produce más rápido de lo que consumimos, descartamos lo más viejo
-    while (fuente.frames.length > MAX_FRAMES_EN_COLA) fuente.frames.shift();
+    // Tope duro de memoria: SOLO en caso patológico (con backpressure no se alcanza).
+    if (fuente.frames.length > CAP_HARD_FRAMES) {
+      fuente.frames.splice(0, fuente.frames.length - CAP_HARD_FRAMES);
+    }
+    return fuente.frames.length < MAX_FRAMES_EN_COLA;
+  }
+
+  /** Cuando la cola de una fuente baja de MIN, avisa para reanudar la tubería. */
+  setStockBajo(id, fn) {
+    const fuente = this.fuentes.get(id);
+    if (fuente) fuente.onStockBajo = fn;
   }
 
   /**
@@ -126,6 +141,7 @@ export class Mixer {
         if (fuente.recibido) this.underruns++;
         continue; // esa fuente no tiene audio aún: silencio parcial
       }
+      if (fuente.frames.length < MIN_FRAMES_EN_COLA) fuente.onStockBajo?.();
       const volumen = fuente.volumen;
       for (let i = 0; i < FRAME_BYTES; i += 2) {
         const muestra = Math.round(frameFuente.readInt16LE(i) * volumen);

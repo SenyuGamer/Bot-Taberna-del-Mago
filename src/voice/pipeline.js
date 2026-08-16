@@ -39,7 +39,23 @@ export function crearPipeline({ url, loop = false, loopDelayMs, onDatos, onFin, 
   let reintentos = 0;
   let reintentosMedio = 0;
   let reintentando = false;
+  let pausado = false;
   const eventos = {};
+
+  // Backpressure: si onDatos devuelve false (cola del mixer llena), pausamos el
+  // ffmpeg de decodificación y lo reanudamos cuando el mixer consuma audio.
+  const pausar = () => {
+    if (!pausado && ffActual?.stdout) {
+      pausado = true;
+      try { ffActual.stdout.pause(); } catch {}
+    }
+  };
+  const reanudar = () => {
+    if (pausado && ffActual?.stdout) {
+      pausado = false;
+      try { ffActual.stdout.resume(); } catch {}
+    }
+  };
 
   // Archivo de caché = sha256(url). Lo buscamos SOLO para enlaces HTTP
   // (las URLs del menú nunca son ficheros locales).
@@ -57,6 +73,8 @@ export function crearPipeline({ url, loop = false, loopDelayMs, onDatos, onFin, 
 
   const lanzar = () => {
     if (detenido) return;
+
+    pausado = false;
 
     const usarCache = archivoCache && existsSync(archivoCache);
     if (usarCache) console.log(`🎵 Caché: leyendo <${url}> desde disco.`);
@@ -112,7 +130,8 @@ export function crearPipeline({ url, loop = false, loopDelayMs, onDatos, onFin, 
         primerChunk = true;
         eventos.primerChunk?.();
       }
-      onDatos?.(bytes);
+      const seguir = onDatos?.(bytes);
+      if (seguir === false) pausar();
     });
 
     let erroresYt = "";
@@ -204,6 +223,8 @@ export function crearPipeline({ url, loop = false, loopDelayMs, onDatos, onFin, 
       });
     },
     estaVivo: () => !detenido,
+    /** Reanuda el ffmpeg de decodificación si estaba pausado por backpressure. */
+    reanudar,
   };
 }
 
