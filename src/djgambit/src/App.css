@@ -223,6 +223,14 @@
   padding: 0 2px;
 }
 
+/* Mientras se arrastra una canción, la cabecera de categoría es zona de destino */
+.cat-cab-destino {
+  padding: 4px 6px;
+  border: 1px dashed rgba(187, 153, 255, 0.5);
+  border-radius: 6px;
+  background: rgba(187, 153, 255, 0.08);
+}
+
 .cat-nombre {
   font-size: 13px;
   font-weight: 700;
@@ -367,16 +375,35 @@
   line-height: 1.2;
 }
 
-/* Formulario de añadir */
+/* Formulario de añadir (popup sobre el panel) */
+.form-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+}
+
 .form {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  width: 230px;
+  width: 300px;
+  max-width: 90vw;
   flex-shrink: 0;
   background: rgb(34, 38, 57);
-  padding: 10px;
-  border-radius: 8px;
+  padding: 14px;
+  border-radius: 10px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.55);
+  border: 1px solid rgba(187, 153, 255, 0.25);
+}
+
+.form-titulo {
+  font-weight: 700;
+  font-size: 14px;
+  color: rgb(187, 153, 255);
 }
 
 .fila {

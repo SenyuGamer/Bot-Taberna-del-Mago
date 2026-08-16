@@ -407,29 +407,58 @@ export default function App() {
     e.preventDefault();
   }
 
-  function onDrop(cat, objetivoId) {
-    if (!arrastrando || arrastrando.cat !== cat || arrastrando.id === objetivoId) {
+  function onDrop(cat, objetivoId = null) {
+    if (!arrastrando) {
       setArrastrando(null);
       return;
     }
-    const mismoCat = (c) => (c.categoria || "Sin categoría") === cat;
-    const ids = canciones.filter(mismoCat).map((c) => c.id);
-    const desde = ids.indexOf(arrastrando.id);
-    const hasta = ids.indexOf(objetivoId);
+    const { cat: catOrigen, id } = arrastrando;
     setArrastrando(null);
-    if (desde < 0 || hasta < 0) return;
-    ids.splice(desde, 1);
-    ids.splice(hasta, 0, arrastrando.id);
-    const porId = new Map(canciones.map((c) => [c.id, c]));
-    const porCategoria = new Map();
-    for (const c of canciones) {
-      const k = c.categoria || "Sin categoría";
-      if (!porCategoria.has(k)) porCategoria.set(k, []);
-      porCategoria.get(k).push(c);
+    const nombreCat = (c) => c.categoria || "Sin categoría";
+    const cancion = canciones.find((c) => c.id === id);
+    if (!cancion) return;
+
+    if (catOrigen === cat) {
+      // Reordenar dentro de la misma categoría.
+      if (objetivoId == null || objetivoId === id) return;
+      const porId = new Map(canciones.map((c) => [c.id, c]));
+      const ids = canciones.filter((c) => nombreCat(c) === cat).map((c) => c.id);
+      const desde = ids.indexOf(id);
+      const hasta = ids.indexOf(objetivoId);
+      if (desde < 0 || hasta < 0) return;
+      ids.splice(desde, 1);
+      ids.splice(hasta, 0, id);
+      const porCategoria = new Map();
+      for (const c of canciones) {
+        const k = nombreCat(c);
+        if (!porCategoria.has(k)) porCategoria.set(k, []);
+        porCategoria.get(k).push(c);
+      }
+      porCategoria.set(cat, ids.map((i) => porId.get(i)));
+      setCanciones([...porCategoria.values()].flat());
+      api(token)("/api/djgambit/menu/orden", { method: "POST", body: JSON.stringify({ ids }) }).catch((e) => setError(e.message));
+      return;
     }
-    porCategoria.set(cat, ids.map((id) => porId.get(id)));
-    setCanciones([...porCategoria.values()].flat());
-    api(token)("/api/djgambit/menu/orden", { method: "POST", body: JSON.stringify({ ids }) }).catch((e) => setError(e.message));
+
+    // Mover la canción a otra categoría (se guarda la nueva categoría en el menú).
+    const catDestino = cat === "Sin categoría" ? "" : cat;
+    const nuevaLista = canciones.map((c) => (c.id === id ? { ...c, categoria: catDestino } : c));
+    setCanciones(nuevaLista);
+    const promesas = [
+      api(token)(`/api/djgambit/menu/${id}`, { method: "PATCH", body: JSON.stringify({ categoria: catDestino }) }).catch((e) => setError(e.message)),
+    ];
+    // Si se soltó sobre una tarjeta concreta, insertarla en esa posición de la categoría destino.
+    if (objetivoId != null && objetivoId !== id) {
+      const ids = nuevaLista.filter((c) => nombreCat(c) === cat).map((c) => c.id);
+      const desde = ids.indexOf(id);
+      const hasta = ids.indexOf(objetivoId);
+      if (desde >= 0 && hasta >= 0) {
+        ids.splice(desde, 1);
+        ids.splice(hasta, 0, id);
+        promesas.push(api(token)("/api/djgambit/menu/orden", { method: "POST", body: JSON.stringify({ ids }) }).catch((e) => setError(e.message)));
+      }
+    }
+    Promise.all(promesas).then(() => sincronizar()).catch(() => {});
   }
 
   // Agrupar canciones por categoría (respetando el orden) y filtrar por búsqueda.
@@ -559,7 +588,12 @@ export default function App() {
           const catLoop = !!cats[g.cat];
           return (
             <div className="cat" key={g.cat}>
-              <div className="cat-cab">
+              <div
+                className={`cat-cab ${arrastrando ? "cat-cab-destino" : ""}`}
+                onDragOver={onDragOver}
+                onDrop={() => onDrop(g.cat, null)}
+                title={arrastrando ? `Mover aquí (${g.cat})` : undefined}
+              >
                 <span className="cat-nombre">▸ {g.cat}</span>
                 <label
                   className={`toggle toggle-cat ${catLoop ? "activa" : ""}`}
@@ -621,8 +655,15 @@ export default function App() {
           );
         })}
 
-        {mostrarForm ? (
-          <div className="form">
+        <button className="boton boton-nueva" onClick={abrirNueva} disabled={cargandoId !== null}>
+            ＋
+          </button>
+      </div>
+
+      {mostrarForm && (
+        <div className="form-overlay" onClick={cancelarForm}>
+          <div className="form" onClick={(e) => e.stopPropagation()}>
+            <div className="form-titulo">{editando ? "✏️ Editar canción" : "➕ Añadir canción"}</div>
             <div className="fila-emoji">
               <input className="input" value={nueva.icono} onChange={(e) => setNueva({ ...nueva, icono: e.target.value })} placeholder="Emoji" maxLength={8} />
               <button
@@ -670,12 +711,8 @@ export default function App() {
               <button className="boton" onClick={cancelarForm}>Cancelar</button>
             </div>
           </div>
-        ) : (
-          <button className="boton boton-nueva" onClick={abrirNueva} disabled={cargandoId !== null}>
-            ＋
-          </button>
-        )}
-      </div>
+        </div>
+      )}
 
       {(sonando || cargandoId === "detener") && (
         <div className="pies">
