@@ -66,7 +66,9 @@ export function crearPipeline({ url, loop = false, loopDelayMs, onDatos, onFin, 
     try {
       if (usarCache) {
         // Sin yt-dlp: ffmpeg decodifica directo el archivo guardado en disco.
-        ff = spawn(cmdFf, ["-hide_banner", "-loglevel", "error", "-re", "-i", archivoCache, "-vn", "-f", "s16le", "-ar", "48000", "-ac", "2", "pipe:1"], { stdio: ["ignore", "pipe", "pipe"] });
+        // Sin "-re": decodifica lo más rápido posible y el mixer (con su buffer
+        // de ~1 s) absorbe la diferencia; la salida ogg/opus queda a 50 fps exactos.
+        ff = spawn(cmdFf, ["-hide_banner", "-loglevel", "error", "-i", archivoCache, "-vn", "-f", "s16le", "-ar", "48000", "-ac", "2", "pipe:1"], { stdio: ["ignore", "pipe", "pipe"] });
       } else {
         yt = spawn(cmdYt, [
           "--no-playlist", "--no-progress",
@@ -77,7 +79,9 @@ export function crearPipeline({ url, loop = false, loopDelayMs, onDatos, onFin, 
           "--retries", "3", "--fragment-retries", "3",
           "-f", "bestaudio/best", "-o", "-", url,
         ], { stdio: ["ignore", "pipe", "pipe"] });
-        ff = spawn(cmdFf, ["-hide_banner", "-loglevel", "error", "-re", "-i", "pipe:0", "-vn", "-f", "s16le", "-ar", "48000", "-ac", "2", "pipe:1"], { stdio: ["pipe", "pipe", "pipe"] });
+        // Sin "-re": la tubería decodifica rápido y rellena el buffer del mixer
+        // (backpressure del pipe acota la memoria), evitando cortes por jitter.
+        ff = spawn(cmdFf, ["-hide_banner", "-loglevel", "error", "-i", "pipe:0", "-vn", "-f", "s16le", "-ar", "48000", "-ac", "2", "pipe:1"], { stdio: ["pipe", "pipe", "pipe"] });
         if (archivoCache) {
           // Guarda una copia de lo que descarga yt-dlp para la próxima vez.
           try {

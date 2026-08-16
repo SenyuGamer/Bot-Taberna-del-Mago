@@ -3,13 +3,19 @@ import { Readable } from "node:stream";
 // Mixer PCM: mezcla N fuentes de audio en una única salida s16le 48 kHz estéreo.
 //
 // Formato: frame de 20 ms = 960 muestras × 2 canales × 2 bytes = 3840 bytes.
-// El reloj interno emite un frame cada 20 ms; @discordjs/voice consume a su ritmo,
-// así que si la salida va lenta descartamos frames (memoria acotada, sin latencia
-// creciente).
+// El reloj interno está ANCLADO al reloj de pared: cada ciclo emite los frames que
+// corresponden al tiempo transcurrido (rellenando con silencio si una fuente no
+// llega a tiempo). Así el stream ogg/opus sale CONTINUO a 50 fps reales y Discord
+// nunca se queda sin frames (evita el audio "cortado / mala conexión" progresivo).
+// Si el event-loop se cuelga, re-anclamos el reloj a "ahora" (sin latencia acumulada).
 
 export const FRAME_BYTES = 960 * 2 * 2;
 const MAX_FRAMES_EN_COLA = 50; // ~1 segundo de cola por fuente
 const SILENCIO = Buffer.alloc(FRAME_BYTES);
+const MS_FRAME = 20; // duración de un frame
+const TICK_MS = 10; // granularidad del reloj (tick fino → emite 0, 1 o 2 frames)
+const BURST_MAX = 4; // máximo de frames por ciclo; si vamos atrás, re-anclamos
+const LEAD_FRAMES = 5; // colchón de arranque: ~100 ms antes de consumir una fuente
 
 export function clampVolumen(v) {
   const n = Number(v);
@@ -19,16 +25,21 @@ export function clampVolumen(v) {
 
 export class Mixer {
   constructor({ intervaloMs = 20 } = {}) {
-    this.fuentes = new Map(); // id -> { frames: Buffer[], resto: Buffer|null, volumen }
+    this.fuentes = new Map(); // id -> { frames: Buffer[], resto: Buffer|null, volumen, recibido }
     this.pausado = false;
+    this.master = 1; // volumen global de la sesión (0..1)
     this.salida = new Readable({ read() {} });
+    this._t0 = Date.now(); // origen del reloj de pared
+    this._emitidos = 0; // frames emitidos desde _t0
+    this.underruns = 0; // contador de frames donde una fuente activa no tenía audio
     this._tickFn = () => this.tick();
-    this.temporizador = setInterval(this._tickFn, intervaloMs);
+    const paso = Math.min(TICK_MS, Number.isFinite(intervaloMs) && intervaloMs > 0 ? intervaloMs : TICK_MS);
+    this.temporizador = setInterval(this._tickFn, paso);
     this.temporizador.unref?.();
   }
 
   agregarFuente(id, volumen = 1) {
-    this.fuentes.set(id, { frames: [], resto: null, volumen: clampVolumen(volumen) });
+    this.fuentes.set(id, { frames: [], resto: null, volumen: clampVolumen(volumen), recibido: false, arrancado: false });
   }
 
   quitarFuente(id) {
@@ -44,6 +55,15 @@ export class Mixer {
     return this.fuentes.get(id)?.volumen ?? null;
   }
 
+  /** Volumen global de la salida mezclada (0..1). */
+  setVolumenGlobal(volumen) {
+    this.master = clampVolumen(volumen);
+  }
+
+  getVolumenGlobal() {
+    return this.master;
+  }
+
   setPausado(pausado) {
     this.pausado = !!pausado;
   }
@@ -52,6 +72,7 @@ export class Mixer {
   empujar(id, bytes) {
     const fuente = this.fuentes.get(id);
     if (!fuente || !bytes?.length) return;
+    fuente.recibido = true;
     fuente.resto = fuente.resto ? Buffer.concat([fuente.resto, bytes]) : bytes;
     while (fuente.resto.length >= FRAME_BYTES) {
       fuente.frames.push(fuente.resto.subarray(0, FRAME_BYTES));
@@ -61,15 +82,50 @@ export class Mixer {
     while (fuente.frames.length > MAX_FRAMES_EN_COLA) fuente.frames.shift();
   }
 
-  /** Genera y emite el frame mezclado de este ciclo de 20 ms. */
+  /**
+   * Ciclo del reloj: emite los frames que corresponden al tiempo real transcurrido.
+   * Si vamos MUY atrás (> BURST_MAX), re-anclamos el reloj en vez de emitir una
+   * ráfaga de audio viejo: el ogg/opus debe ir a 50 fps exactos, siempre.
+   */
   tick() {
-    if (this.pausado || this.fuentes.size === 0) {
-      return this._emitir(SILENCIO);
+    const ahora = Date.now();
+    const objetivos = Math.floor((ahora - this._t0) / MS_FRAME);
+    let aEmitir = objetivos - this._emitidos;
+    if (aEmitir > BURST_MAX) {
+      this._t0 = ahora;
+      this._emitidos = objetivos;
+      aEmitir = 1;
     }
+    if (aEmitir <= 0) return null;
+    this._emitidos += aEmitir;
+    let ultimo = null;
+    for (let i = 0; i < aEmitir; i++) ultimo = this._emitirUnFrame();
+    return ultimo;
+  }
+
+  /** Genera y emite un frame mezclado de 20 ms (o silencio si no hay nada). */
+  _emitirUnFrame() {
+    const frame = this.pausado || this.fuentes.size === 0 ? SILENCIO : this._mezclar();
+    this._emitir(frame);
+    return frame;
+  }
+
+  _mezclar() {
     const frame = Buffer.alloc(FRAME_BYTES);
     for (const fuente of this.fuentes.values()) {
+      if (!fuente.arrancado) {
+        // Colchón de arranque: no consumimos hasta tener ~100 ms, para que la
+        // tubería gane tiempo de sobra y el primer tramo no tenga silencios.
+        if (fuente.recibido && fuente.frames.length >= LEAD_FRAMES) fuente.arrancado = true;
+        continue;
+      }
       const frameFuente = fuente.frames.shift();
-      if (!frameFuente) continue; // esa fuente no tiene audio aún: silencio parcial
+      if (!frameFuente) {
+        // Fuente arrancada pero sin audio disponible: subalimentación. Con el
+        // ritmo anclado y sin -re en la tubería esto no debería ocurrir en marcha.
+        if (fuente.recibido) this.underruns++;
+        continue; // esa fuente no tiene audio aún: silencio parcial
+      }
       const volumen = fuente.volumen;
       for (let i = 0; i < FRAME_BYTES; i += 2) {
         const muestra = Math.round(frameFuente.readInt16LE(i) * volumen);
@@ -78,7 +134,12 @@ export class Mixer {
         frame.writeInt16LE(valor, i);
       }
     }
-    this._emitir(frame);
+    if (this.master !== 1) {
+      for (let i = 0; i < FRAME_BYTES; i += 2) {
+        const v = Math.round(frame.readInt16LE(i) * this.master);
+        frame.writeInt16LE(v > 32767 ? 32767 : v < -32768 ? -32768 : v, i);
+      }
+    }
     return frame;
   }
 
