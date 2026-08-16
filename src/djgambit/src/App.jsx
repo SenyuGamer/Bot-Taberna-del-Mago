@@ -95,21 +95,25 @@ export default function App() {
     if (!token) return;
     const f = api(token);
     try {
-      const [menu, est] = await Promise.all([f("/api/djgambit/menu"), f("/api/djgambit/estado")]);
-      const canc = menu.canciones ?? [];
+      const [menuR, estR] = await Promise.allSettled([f("/api/djgambit/menu"), f("/api/djgambit/estado")]);
+      if (menuR.status === "rejected") throw menuR.reason;
+      const canc = menuR.value.canciones ?? [];
+      const est = estR.status === "fulfilled" ? estR.value : null;
       const sig = JSON.stringify({
         canc,
-        sonando: est.sonando ? { id: est.cancionId, nombre: est.nombre, inicioEn: est.inicioEn, duracionMs: est.duracionMs } : null,
-        cache: est.cache ?? null,
-        cacheando: est.cacheando ?? [],
-        vol: est.volumen ?? 100,
+        sonando: est?.sonando ? { id: est.cancionId, nombre: est.nombre, inicioEn: est.inicioEn, duracionMs: est.duracionMs } : null,
+        cache: est?.cache ?? null,
+        cacheando: est?.cacheando ?? [],
+        vol: est?.volumen ?? 100,
       });
       if (sig !== ultimoJson.current) {
         ultimoJson.current = sig;
         setCanciones(canc);
-        setSonando(est.sonando ? { id: est.cancionId, nombre: est.nombre, inicioEn: est.inicioEn, duracionMs: est.duracionMs } : null);
-        setCacheInfo({ ...(est.cache ?? {}), cacheando: (est.cacheando ?? []).length });
-        if (!volumenAjustando.current) setVolumen(est.volumen ?? 100);
+        if (est) {
+          setSonando(est.sonando ? { id: est.cancionId, nombre: est.nombre, inicioEn: est.inicioEn, duracionMs: est.duracionMs } : null);
+          setCacheInfo({ ...(est.cache ?? {}), cacheando: (est.cacheando ?? []).length });
+          if (!volumenAjustando.current) setVolumen(est.volumen ?? 100);
+        }
       }
     } catch (e) {
       if (/vinculado/i.test(e.message)) {

@@ -236,9 +236,10 @@ function archivosEnCache(cacheDir) {
  */
 export function estadoCache({ urls = [], cacheDir = CACHE_DIR } = {}) {
   const validas = new Set(urls.map((u) => rutaCache({ url: u, cacheDir }).split(/[\\/]/).pop()));
+  const archivos = archivosEnCache(cacheDir);
   let tamañoBytes = 0;
   let huerfanos = 0;
-  for (const n of archivosEnCache(cacheDir)) {
+  for (const n of archivos) {
     try { tamañoBytes += statSync(join(cacheDir, n)).size; } catch {}
     if (!validas.has(n) && !n.endsWith(".part")) huerfanos++;
   }

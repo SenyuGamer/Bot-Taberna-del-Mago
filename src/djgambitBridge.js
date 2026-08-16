@@ -381,7 +381,13 @@ app.delete("/api/djgambit/menu/:id", (req, res) => {
     const guildId = guildDeToken(req);
     if (!guildId) return res.status(401).json({ ok: false, error: "Panel no vinculado a un servidor. Usa /musica vincular." });
     const estado = estadoCancionMenu(guildId);
-    const cache = estadoCache({ urls: listarCancionesMenu().map((c) => c.url) });
+    let cache;
+    try {
+      cache = estadoCache({ urls: listarCancionesMenu().map((c) => c.url) });
+    } catch (e) {
+      console.log("⚠️ No se pudo medir la caché:", e.message);
+      cache = { total: 0, tamañoBytes: 0, huerfanos: 0 };
+    }
     res.json({ ok: true, ...estado, cacheando: [...precargas.keys()], cache });
   });
 
