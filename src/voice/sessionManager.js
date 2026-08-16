@@ -23,6 +23,11 @@ export function _setFabricaPipelines(f) { fabricaPipelines.crearPipeline = f; }
 
 const MS_SILENCIO_PARA_SALIR = 5 * 60 * 1000;
 
+// Reconexión automática tras caídas de la conexión de voz (DAVE/red).
+// Máximo 3 intentos por ventana de 10 min; si sigue cayéndose, se para.
+const MAX_RECONEXIONES = 3;
+const MS_VENTANA_RECONEXION = 10 * 60 * 1000;
+
 const FFPROBE = process.env.FFPROBE_PATH || "ffprobe";
 const YTDLP_DURACION = process.env.YTDLP_PATH || "yt-dlp";
 const CACHE_DIR = process.env.MUSIC_CACHE_DIR || "data/music-cache";
@@ -101,12 +106,9 @@ export async function unir(guild, canal, clientId) {
   connection.on("stateChange", (_viejo, nuevo) => {
     console.log(`🎵 Voz (${guild.name}): ${nuevo.status}`);
     if (nuevo.status === VoiceConnectionStatus.Destroyed) {
-      // La conexión se cayó/cerró: eliminamos la sesión para que el próximo
-      // play cree una nueva (evita quedarse con una sesión muerta y muda).
-      if (sesiones.get(guild.id) === sesion) {
-        console.log(`🎵 Voz (${guild.name}): conexión destruida; limpiando sesión.`);
-        parar(guild.id);
-      }
+      // La conexión se cayó/cerró: si hay música sonando intentamos reconectar
+      // solos (limita con un contador); si no, limpiamos la sesión.
+      if (sesiones.get(guild.id) === sesion) _trasCaida(sesion, "conexión destruida");
     }
   });
   connection.on("error", (error) => {
@@ -122,6 +124,10 @@ export async function unir(guild, canal, clientId) {
   const sesion = {
     guildId: guild.id,
     canalId: canal.id,
+    guild, // para poder reconectar tras una caída
+    clientId, // para reconectar tras una caída
+    reconexiones: 0,
+    ultimaCaida: null,
     connection,
     player,
     mixer,
@@ -182,6 +188,86 @@ export function parar(guildId) {
   try { s.connection.destroy(); } catch {}
   sesiones.delete(guildId);
   return true;
+}
+
+// ---------- Reconexión automática tras caídas de la conexión de voz ----------
+
+/**
+ * Maneja una caída de la conexión de voz (o un error de cifrado DAVE):
+ * si hay fuentes sonando, reconecta la sesión; si no (o se agotaron los
+ * intentos), limpia la sesión para que el próximo play cree una nueva.
+ */
+function _trasCaida(sesion, motivo) {
+  const ahora = Date.now();
+  if (sesion.ultimaCaida && ahora - sesion.ultimaCaida > MS_VENTANA_RECONEXION) {
+    sesion.reconexiones = 0;
+  }
+  sesion.ultimaCaida = ahora;
+  sesion.reconexiones = (sesion.reconexiones ?? 0) + 1;
+
+  const nombre = sesion.guild?.name ?? sesion.guildId;
+  const huboAudio = sesion.fuentes.size > 0;
+  if (huboAudio && sesion.reconexiones <= MAX_RECONEXIONES) {
+    console.log(`🎵 Voz (${nombre}): ${motivo}; reconectando (intento ${sesion.reconexiones}/${MAX_RECONEXIONES}).`);
+    _reconectarSesion(sesion);
+  } else if (sesiones.get(sesion.guildId) === sesion) {
+    console.log(`🎵 Voz (${nombre}): ${motivo}; limpiando sesión.`);
+    parar(sesion.guildId);
+  }
+}
+
+/**
+ * Recrea la sesión (nueva conexión + player + mixer) y vuelve a añadir las
+ * fuentes que estaban sonando, para que la música siga sin intervención.
+ */
+async function _reconectarSesion(sesion) {
+  const { guild, canalId, clientId } = sesion;
+  const canal = guild?.channels?.cache?.get(canalId);
+  if (!guild || !canal || !clientId) {
+    if (sesiones.get(sesion.guildId) === sesion) parar(sesion.guildId);
+    return;
+  }
+
+  const fuentesPrevias = [...sesion.fuentes.values()].map((f) => ({
+    id: f.id, url: f.url, tipo: f.tipo, loop: f.loop, volumen: f.volumen,
+    userId: f.userId, nombre: f.nombre, cancionId: f.cancionId,
+  }));
+  // Si la caída pilló a mitad de un crossfade, restauramos la canción entrante.
+  const transicion = fuentesPrevias.find((f) => f.id === "menu:transicion");
+  const activa = transicion ?? fuentesPrevias.find((f) => f.id === "menu:activa");
+  const menuPlaylist = sesion.menuPlaylist ? { ...sesion.menuPlaylist } : null;
+  const reconexiones = sesion.reconexiones;
+  const ultimaCaida = sesion.ultimaCaida;
+
+  parar(sesion.guildId); // limpia la sesión caída (evita bucles por Destroyed)
+
+  try {
+    const nueva = await unir(guild, canal, clientId);
+    nueva.reconexiones = reconexiones;
+    nueva.ultimaCaida = ultimaCaida;
+    if (activa) {
+      _ponerCancionActiva(nueva, { id: activa.cancionId, url: activa.url, nombre: activa.nombre, loop: activa.loop }, 0);
+    }
+    if (menuPlaylist) nueva.menuPlaylist = menuPlaylist;
+    for (const f of fuentesPrevias) {
+      if (f.tipo === "menu") continue; // la canción activa ya se restauró
+      agregarFuente(nueva.guildId, {
+        ...f,
+        onError: (e) => console.error(`🎵 Canción manual falló tras reconexión:`, e.message),
+      });
+    }
+    console.log(`🎵 Sesión de ${guild.name} reconectada tras caída de la conexión de voz.`);
+  } catch (e) {
+    console.error(`🎵 No pude reconectar ${guild.name}:`, e.message);
+    if (sesiones.get(sesion.guildId) === sesion) parar(sesion.guildId);
+  }
+}
+
+/** Reconecta todas las sesiones con audio (p. ej. tras un error DAVE no capturado). */
+export function reconectarTodasSesiones() {
+  for (const s of [...sesiones.values()]) {
+    if (s.fuentes.size > 0) _trasCaida(s, "error de cifrado de voz (DAVE)");
+  }
 }
 
 export function canalGuardado(guildId) {

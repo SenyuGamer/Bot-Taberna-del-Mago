@@ -9,7 +9,25 @@ import { musica } from "./commands/musica.js";
 import { embedError } from "./utils.js";
 import { iniciarTwitch } from "./twitch.js";
 import { iniciarPuenteDjgambit } from "./djgambitBridge.js";
-import { programarSalidaSiVacio } from "./voice/sessionManager.js";
+import { programarSalidaSiVacio, reconectarTodasSesiones } from "./voice/sessionManager.js";
+
+// Blindaje: un error del cifrado de voz (DAVE, build WASM de davey en RISC-V)
+// no debe tumbar todo el proceso. Se loguea, se reconectan las sesiones de voz
+// y el resto del bot sigue vivo.
+const ES_ERROR_DE_VOZ = /dave|voice|proposal|InvalidSignature/i;
+
+process.on("uncaughtException", (error) => {
+  const mensaje = error?.message ?? String(error);
+  console.error(`⚠️ Excepción no capturada: ${mensaje}`);
+  console.error(error?.stack ?? "");
+  if (ES_ERROR_DE_VOZ.test(mensaje)) reconectarTodasSesiones();
+});
+
+process.on("unhandledRejection", (razon) => {
+  const mensaje = razon?.message ?? String(razon);
+  console.error(`⚠️ Promesa rechazada sin capturar: ${mensaje}`);
+  if (ES_ERROR_DE_VOZ.test(mensaje)) reconectarTodasSesiones();
+});
 
 const token = process.env.DISCORD_TOKEN;
 if (!token || token === "pega_aqui_tu_token") {
