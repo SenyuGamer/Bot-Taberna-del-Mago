@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import {
   joinVoiceChannel,
   createAudioPlayer,
@@ -8,7 +9,7 @@ import {
 } from "@discordjs/voice";
 import { PermissionsBitField } from "discord.js";
 import { Mixer, clampVolumen } from "./mixer.js";
-import { crearPipeline } from "./pipeline.js";
+import { crearPipeline, existeCache, rutaCache } from "./pipeline.js";
 import { crearEncoderOpus } from "./encoderOpus.js";
 import { setCanalDjgambit, getCanalDjgambit } from "../db.js";
 
@@ -21,6 +22,39 @@ const fabricaPipelines = { crearPipeline }; // indirección para pruebas
 export function _setFabricaPipelines(f) { fabricaPipelines.crearPipeline = f; }
 
 const MS_SILENCIO_PARA_SALIR = 5 * 60 * 1000;
+
+const FFPROBE = process.env.FFPROBE_PATH || "ffprobe";
+const YTDLP_DURACION = process.env.YTDLP_PATH || "yt-dlp";
+const CACHE_DIR = process.env.MUSIC_CACHE_DIR || "data/music-cache";
+
+// Presencia del bot mientras suena música del menú: lo registra el bridge.
+let onCambioSonando = null;
+export function setOnCambioSonando(fn) { onCambioSonando = fn; }
+
+/**
+ * Averigua la duración (ms) de una URL de forma no bloqueante:
+ * ffprobe del archivo en caché si existe, o una consulta ligera de yt-dlp.
+ */
+function _obtenerDuracion(url, cacheDir, alTerminar) {
+  const resolver = (ms) => { if (Number.isFinite(ms) && ms > 0) alTerminar(Math.round(ms)); };
+  const enCache = existeCache({ url, cacheDir });
+  const args = enCache
+    ? ["-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", rutaCache({ url, cacheDir })]
+    : ["--no-playlist", "--no-warnings", "--print", "duration", url];
+  let proc;
+  try {
+    proc = spawn(enCache ? FFPROBE : YTDLP_DURACION, args, { stdio: ["ignore", "pipe", "ignore"] });
+  } catch { return; }
+  const tope = setTimeout(() => { try { proc.kill("SIGKILL"); } catch {} }, 20_000);
+  tope.unref?.();
+  let salida = "";
+  proc.stdout.on("data", (d) => { if (salida.length < 200) salida += d.toString(); });
+  proc.on("error", () => clearTimeout(tope));
+  proc.on("close", () => {
+    clearTimeout(tope);
+    resolver(parseFloat(salida.trim()) * 1000);
+  });
+}
 
 export function getSesion(guildId) {
   return sesiones.get(guildId) ?? null;
@@ -84,6 +118,7 @@ export async function unir(guild, canal, clientId) {
     temporizadorVacio: null,
     crossfadeTimer: null,
     menuPlaylist: null, // { categoria, canciones, indice } — playlist por categoría activa
+    timeline: null, // { nombre, inicioEn, duracionMs } de la canción del menú sonando
   };
   sesiones.set(guild.id, sesion);
   setCanalDjgambit(guild.id, canal.id);
@@ -196,6 +231,14 @@ export function reproducirCancionMenu(guildId, { id = null, url, nombre = "", lo
 }
 
 /** Reproduce una canción concreta del menú y avanza la playlist al acabar. */
+function _marcarTimeline(s, { id, url, nombre }) {
+  s.timeline = { id, url, nombre, inicioEn: Date.now(), duracionMs: null };
+  onCambioSonando?.(nombre);
+  _obtenerDuracion(url, CACHE_DIR, (ms) => {
+    if (s.timeline?.id === id) s.timeline.duracionMs = ms;
+  });
+}
+
 function _ponerCancionActiva(s, { id, url, nombre, loop }, crossfadeMs) {
   // Durante una transición la "activa" sigue siendo la vieja; la nueva entra como "menu:transicion".
   if (s.fuentes.has("menu:transicion")) {
@@ -208,7 +251,7 @@ function _ponerCancionActiva(s, { id, url, nombre, loop }, crossfadeMs) {
   // El menú reproduce una canción a la vez (id estable "menu:activa").
   // Sin canción previa o sin crossfade: reemplazo directo.
   if (!activa || crossfadeMs <= 0) {
-    return agregarFuente(s.guildId, {
+    const creada = agregarFuente(s.guildId, {
       id: "menu:activa",
       url,
       volumen: 1,
@@ -216,9 +259,16 @@ function _ponerCancionActiva(s, { id, url, nombre, loop }, crossfadeMs) {
       nombre,
       tipo: "menu",
       cancionId: id,
-      onFin: () => { if (!loop) _avanzarPlaylistPorFin(s.guildId); },
+      onFin: () => {
+        if (!loop) {
+          if (!s.menuPlaylist) { s.timeline = null; onCambioSonando?.(null); }
+          _avanzarPlaylistPorFin(s.guildId);
+        }
+      },
       onError: (e) => console.error(`🎵 Canción del menú falló:`, e.message),
     });
+    if (creada) _marcarTimeline(s, { id, url, nombre });
+    return creada;
   }
 
   // Crossfade: la nueva entra con volumen 0 mientras la vieja se desvanece.
@@ -233,6 +283,7 @@ function _ponerCancionActiva(s, { id, url, nombre, loop }, crossfadeMs) {
     onError: (e) => console.error(`🎵 Canción del menú falló:`, e.message),
   });
   if (!creada) return null;
+  _marcarTimeline(s, { id, url, nombre });
 
   let paso = 0;
   s.crossfadeTimer = setInterval(() => {
@@ -240,7 +291,13 @@ function _ponerCancionActiva(s, { id, url, nombre, loop }, crossfadeMs) {
       // La nueva falló: la vieja recupera su volumen y se cancela el desvanecido.
       clearInterval(s.crossfadeTimer);
       s.crossfadeTimer = null;
-      if (activa) s.mixer.setVolumen("menu:activa", 1);
+      if (activa) {
+        s.mixer.setVolumen("menu:activa", 1);
+        // El timeline vuelve a la canción que sigue sonando de verdad.
+        if (s.timeline) {
+          s.timeline = { id: activa.cancionId, url: activa.url, nombre: activa.nombre, inicioEn: Date.now(), duracionMs: null };
+        }
+      }
       return;
     }
     paso++;
@@ -303,6 +360,8 @@ export function pararCancionMenu(guildId) {
   if (!s) return false;
   if (s.crossfadeTimer) { clearInterval(s.crossfadeTimer); s.crossfadeTimer = null; }
   s.menuPlaylist = null;
+  s.timeline = null;
+  onCambioSonando?.(null);
   let quitada = false;
   for (const id of ["menu:activa", "menu:transicion"]) {
     if (s.fuentes.has(id)) {
@@ -317,8 +376,17 @@ export function pararCancionMenu(guildId) {
 export function estadoCancionMenu(guildId) {
   const s = sesiones.get(guildId);
   const fuente = s?.fuentes.get("menu:transicion") ?? s?.fuentes.get("menu:activa");
-  if (!fuente) return { sonando: false, url: null, nombre: null, cancionId: null };
-  return { sonando: true, url: fuente.url, nombre: fuente.nombre, cancionId: fuente.cancionId ?? null };
+  const volumen = s ? Math.round((s.mixer.getVolumenGlobal?.() ?? 1) * 100) : 100;
+  if (!fuente) return { sonando: false, url: null, nombre: null, cancionId: null, inicioEn: null, duracionMs: null, volumen };
+  return {
+    sonando: true,
+    url: fuente.url,
+    nombre: fuente.nombre,
+    cancionId: fuente.cancionId ?? null,
+    inicioEn: s?.timeline?.inicioEn ?? null,
+    duracionMs: s?.timeline?.duracionMs ?? null,
+    volumen,
+  };
 }
 
 // ---------- Salida automática si el canal se queda vacío ----------

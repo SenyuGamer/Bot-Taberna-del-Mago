@@ -168,11 +168,21 @@ try {
   db.exec("ALTER TABLE menu_canciones ADD COLUMN categoria TEXT NOT NULL DEFAULT ''");
 } catch {}
 
-const getMenuStmt = db.prepare("SELECT id, nombre, icono, url, loop, categoria FROM menu_canciones ORDER BY id ASC");
-const getCancionStmt = db.prepare("SELECT id, nombre, icono, url, loop, categoria FROM menu_canciones WHERE id = ?");
+// Migración: orden de las canciones dentro de su categoría (drag & drop).
+try {
+  db.exec("ALTER TABLE menu_canciones ADD COLUMN orden INTEGER NOT NULL DEFAULT 0");
+} catch {}
+
+const getMenuStmt = db.prepare("SELECT id, nombre, icono, url, loop, categoria, orden FROM menu_canciones ORDER BY orden ASC, id ASC");
+const getCancionStmt = db.prepare("SELECT id, nombre, icono, url, loop, categoria, orden FROM menu_canciones WHERE id = ?");
 const insertCancionStmt = db.prepare(
-  "INSERT INTO menu_canciones (nombre, icono, url, loop, categoria, created_at) VALUES (?, ?, ?, ?, ?, ?)"
+  "INSERT INTO menu_canciones (nombre, icono, url, loop, categoria, orden, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
 );
+const maxOrdenStmt = db.prepare("SELECT COALESCE(MAX(orden), -1) AS max FROM menu_canciones WHERE categoria = ?");
+const updateCancionStmt = db.prepare(
+  "UPDATE menu_canciones SET nombre = ?, icono = ?, url = ?, loop = ?, categoria = ? WHERE id = ?"
+);
+const setOrdenStmt = db.prepare("UPDATE menu_canciones SET orden = ? WHERE id = ?");
 const deleteCancionStmt = db.prepare("DELETE FROM menu_canciones WHERE id = ?");
 
 export function listarCancionesMenu() {
@@ -185,8 +195,22 @@ export function getCancionMenu(id) {
 }
 
 export function agregarCancionMenu({ nombre, icono = "", url, loop = false, categoria = "" }) {
-  const info = insertCancionStmt.run(nombre, icono, url, loop ? 1 : 0, String(categoria).trim(), new Date().toISOString());
+  const cat = String(categoria).trim();
+  const orden = maxOrdenStmt.get(cat).max + 1;
+  const info = insertCancionStmt.run(nombre, icono, url, loop ? 1 : 0, cat, orden, new Date().toISOString());
   return getCancionMenu(info.lastInsertRowid);
+}
+
+export function actualizarCancionMenu(id, { nombre, icono = "", url, loop = false, categoria = "" }) {
+  const cambios = updateCancionStmt.run(nombre, String(icono), url, loop ? 1 : 0, String(categoria).trim(), id);
+  return cambios.changes > 0 ? getCancionMenu(id) : null;
+}
+
+/** Reordena canciones: cada id recibe el orden de su posición en el array. */
+export function setOrdenCancionesMenu(ids) {
+  const numericos = (ids ?? []).filter((n) => Number.isInteger(Number(n))).map(Number);
+  numericos.forEach((id, idx) => setOrdenStmt.run(idx, id));
+  return numericos.length;
 }
 
 export function borrarCancionMenu(id) {

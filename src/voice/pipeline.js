@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, createWriteStream, mkdirSync, renameSync, rmSync } from "node:fs";
+import { existsSync, createWriteStream, mkdirSync, renameSync, rmSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 // Pipeline por link: yt-dlp (descarga el audio de la URL) → ffmpeg (lo convierte a
@@ -224,6 +224,57 @@ export function borrarCache({ url, cacheDir = CACHE_DIR }) {
   const existia = existsSync(archivo);
   try { rmSync(archivo, { force: true }); } catch {}
   return existia;
+}
+
+function archivosEnCache(cacheDir) {
+  try { return readdirSync(cacheDir).filter((n) => /\.(weba|part)$/.test(n)); } catch { return []; }
+}
+
+/**
+ * Estado de la caché: total de archivos, tamaño y cuántos son huérfanos
+ * (.weba que ya no corresponde a ninguna URL del menú).
+ */
+export function estadoCache({ urls = [], cacheDir = CACHE_DIR } = {}) {
+  const validas = new Set(urls.map((u) => rutaCache({ url: u, cacheDir }).split(/[\\/]/).pop()));
+  let tamañoBytes = 0;
+  let huerfanos = 0;
+  for (const n of archivosEnCache(cacheDir)) {
+    try { tamañoBytes += statSync(join(cacheDir, n)).size; } catch {}
+    if (!validas.has(n) && !n.endsWith(".part")) huerfanos++;
+  }
+  return { total: archivos.length, tamañoBytes, huerfanos };
+}
+
+/** Vacía la caché por completo (todas las canciones guardadas). Devuelve cuántas borró. */
+export function vaciarCache({ cacheDir = CACHE_DIR } = {}) {
+  let eliminados = 0;
+  for (const n of archivosEnCache(cacheDir)) {
+    try { rmSync(join(cacheDir, n), { force: true }); eliminados++; } catch {}
+  }
+  return eliminados;
+}
+
+/**
+ * Poda la caché: borra .weba huérfanos (URL ya no en el menú) y .part viejos
+ * (descargas abandonadas). Devuelve { huerfanos, parciales }.
+ */
+export function podarCache({ urls = [], cacheDir = CACHE_DIR, edadPartMs = 60 * 60 * 1000 } = {}) {
+  const validas = new Set(urls.map((u) => rutaCache({ url: u, cacheDir }).split(/[\\/]/).pop()));
+  let huerfanos = 0;
+  let parciales = 0;
+  for (const n of archivosEnCache(cacheDir)) {
+    const camino = join(cacheDir, n);
+    if (n.endsWith(".part")) {
+      try {
+        if (Date.now() - statSync(camino).mtimeMs > edadPartMs) { rmSync(camino, { force: true }); parciales++; }
+      } catch {}
+      continue;
+    }
+    if (!validas.has(n)) {
+      try { rmSync(camino, { force: true }); huerfanos++; } catch {}
+    }
+  }
+  return { huerfanos, parciales };
 }
 
 /**

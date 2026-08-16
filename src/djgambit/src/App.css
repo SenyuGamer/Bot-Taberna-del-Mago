@@ -422,4 +422,169 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
+}
+
+.pies-sonando {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+/* Barra de utilidades: buscar + volumen + estado de caché */
+.barra {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.buscar {
+  flex: 1;
+  min-width: 120px;
+  font-size: 14px;
+}
+
+.volumen-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 15px;
+  background: rgb(34, 38, 57);
+  border-radius: 8px;
+  padding: 5px 10px;
+}
+
+.volumen-control input[type="range"] {
+  width: 80px;
+  accent-color: rgb(129, 77, 222);
+  cursor: pointer;
+}
+
+.volumen-val {
+  font-size: 12px;
+  font-weight: 700;
+  min-width: 34px;
+  text-align: center;
+  color: #c0c2c7;
+}
+
+.cache-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  background: rgb(34, 38, 57);
+  border-radius: 8px;
+  padding: 4px 8px;
+  color: #c0c2c7;
+}
+
+.cache-huerfanas {
+  color: rgb(255, 196, 87);
+  font-weight: 700;
+}
+
+.cache-badge .boton-chico {
+  padding: 2px 5px;
+  font-size: 13px;
+}
+
+/* Timeline de la canción sonando */
+.timeline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+
+.timeline-barra {
+  flex: 1;
+  height: 6px;
+  border-radius: 3px;
+  background: rgb(34, 38, 57);
+  overflow: hidden;
+}
+
+.timeline-lleno {
+  height: 100%;
+  background: rgb(129, 77, 222);
+  border-radius: 3px;
+  transition: width 0.4s linear;
+}
+
+.timeline-tiempo {
+  font-size: 12px;
+  color: #c0c2c7;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Botón de editar sobre la tarjeta (abajo-izquierda) */
+.editar {
+  position: absolute;
+  bottom: 5px;
+  left: 5px;
+  border: 0;
+  background: rgba(0, 0, 0, 0.55);
+  border-radius: 10px;
+  font-size: 15px;
+  line-height: 1;
+  padding: 4px 6px;
+  cursor: pointer;
+  opacity: 0.9;
+  transition: opacity 100ms linear, background-color 100ms linear;
+}
+
+.editar:hover { opacity: 1; background: rgba(129, 77, 222, 0.7); }
+
+/* Drag & drop */
+.escena[draggable="true"] {
+  cursor: grab;
+}
+
+.escena-arrastrando {
+  opacity: 0.45;
+}
+
+.escena-arrastrando .escena-btn {
+  border-style: dashed;
+  border-color: rgb(187, 153, 255);
+}
+
+/* Formulario: fila emoji + selector */
+.fila-emoji {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.fila-emoji .input {
+  flex: 1;
+}
+
+.emoji-picker {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 4px;
+  background: rgb(41, 45, 60);
+  border-radius: 8px;
+  padding: 6px;
+}
+
+.emoji-opcion {
+  border: 0;
+  background: transparent;
+  font-size: 20px;
+  line-height: 1;
+  padding: 4px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background-color 100ms linear;
+}
+
+.emoji-opcion:hover {
+  background: rgb(58, 61, 75);
 }

@@ -8,10 +8,11 @@ import OBR from "@owlbear-rodeo/sdk";
 // - Muestra el menú global de canciones agrupado por categorías (tarjetas con
 //   icono encima y nombre debajo, como en la app original de DJGAMBIT).
 // - Clic en una tarjeta → suena SOLO en el bot de Discord (nunca aquí).
-// - Las canciones se guardan en caché automáticamente al añadirlas y se quitan
-//   de la caché al borrarlas; se muestra "guardando en caché…" mientras se baja.
-// - 🔁 por canción: repetir esa canción. ↻ por categoría: suena toda la categoría
-//   en bucle (lista de reproducción).
+// - Caché automática al añadir; ✓ en la tarjeta cuando está guardada.
+// - 🔁 por canción: repetir. ↻ por categoría: playlist en bucle.
+// - Drag & drop para reordenar dentro de la categoría; ✏ editar; 🔍 buscar.
+// - Volumen de sesión, timeline de lo que suena, exportar/importar menú (JSON)
+//   y gestión de la caché (podar huérfanas / vaciar todo).
 
 const API = ""; // relativo: el panel se sirve desde el mismo túnel que el bridge
 
@@ -21,6 +22,13 @@ const ESTADOS = {
   NO_VINCULADO: "no-vinculado",
   LISTO: "listo",
 };
+
+// Emojis predefinidos para el icono de cada canción.
+const EMOJIS = [
+  "🎵", "🎶", "🎸", "🥁", "🎹", "🎻", "🎺", "🎷", "🎤", "🎧", "🎼", "📻",
+  "🪕", "🪗", "🪘", "🎯", "🔥", "🍺", "🧙", "🛡️", "⚔️", "🐉", "✨", "🌙",
+  "🏮", "📜",
+];
 
 function api(token) {
   return async (ruta, opciones = {}) => {
@@ -33,24 +41,46 @@ function api(token) {
   };
 }
 
+function formatearTiempo(ms) {
+  if (!Number.isFinite(ms) || ms < 0) return "0:00";
+  const s = Math.floor(ms / 1000);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+
+function formatearBytes(n) {
+  if (!Number.isFinite(n)) return "0 B";
+  if (n < 1024) return `${n} B`;
+  if (n < 1048576) return `${Math.round(n / 1024)} KB`;
+  return `${(n / 1048576).toFixed(1)} MB`;
+}
+
 export default function App() {
   const [estado, setEstado] = useState(ESTADOS.CARGANDO);
   const [token, setToken] = useState(() => localStorage.getItem("djgambit_token") || "");
   const [codigo, setCodigo] = useState("");
   const [canciones, setCanciones] = useState([]);
-  const [sonando, setSonando] = useState(null); // { id, nombre }
+  const [sonando, setSonando] = useState(null); // { id, nombre, inicioEn, duracionMs }
   const [guildName, setGuildName] = useState("");
   const [mensaje, setMensaje] = useState("");
   const [error, setError] = useState("");
   const [vinculando, setVinculando] = useState(false);
   const [cargandoId, setCargandoId] = useState(null); // id de la canción en proceso
   const [mostrarForm, setMostrarForm] = useState(false);
+  const [editando, setEditando] = useState(null); // canción siendo editada
   const [nueva, setNueva] = useState({ nombre: "", icono: "", url: "", categoria: "" });
+  const [busqueda, setBusqueda] = useState("");
+  const [volumen, setVolumen] = useState(100);
+  const [cacheInfo, setCacheInfo] = useState(null); // { total, tamañoBytes, huerfanos, cacheando }
   const [crossfadeS, setCrossfadeS] = useState(() => Number(localStorage.getItem("djgambit_crossfade_s")) || 0); // segundos (0 = off)
   const [loops, setLoops] = useState(() => JSON.parse(localStorage.getItem("djgambit_loops") || "{}")); // id -> bool
   const [cats, setCats] = useState(() => JSON.parse(localStorage.getItem("djgambit_cats") || "{}")); // categoria -> bool (playlist)
+  const [mostrarEmojis, setMostrarEmojis] = useState(false);
+  const [arrastrando, setArrastrando] = useState(null); // { cat, id }
 
   const ultimoJson = useRef("");
+  const volumenAjustando = useRef(false);
+  const volumenTimer = useRef(null);
+  const archivoImportRef = useRef(null);
 
   const sincronizar = useCallback(async () => {
     if (!token) return;
@@ -58,11 +88,19 @@ export default function App() {
     try {
       const [menu, est] = await Promise.all([f("/api/djgambit/menu"), f("/api/djgambit/estado")]);
       const canc = menu.canciones ?? [];
-      const sig = JSON.stringify({ canc, sonando: est.sonando ? { id: est.cancionId, nombre: est.nombre } : null });
+      const sig = JSON.stringify({
+        canc,
+        sonando: est.sonando ? { id: est.cancionId, nombre: est.nombre, inicioEn: est.inicioEn, duracionMs: est.duracionMs } : null,
+        cache: est.cache ?? null,
+        cacheando: est.cacheando ?? [],
+        vol: est.volumen ?? 100,
+      });
       if (sig !== ultimoJson.current) {
         ultimoJson.current = sig;
         setCanciones(canc);
-        setSonando(est.sonando ? { id: est.cancionId, nombre: est.nombre } : null);
+        setSonando(est.sonando ? { id: est.cancionId, nombre: est.nombre, inicioEn: est.inicioEn, duracionMs: est.duracionMs } : null);
+        setCacheInfo({ ...(est.cache ?? {}), cacheando: (est.cacheando ?? []).length });
+        if (!volumenAjustando.current) setVolumen(est.volumen ?? 100);
       }
     } catch (e) {
       if (/vinculado/i.test(e.message)) {
@@ -86,18 +124,26 @@ export default function App() {
         return;
       }
       OBR.action.setWidth(640);
-      OBR.action.setHeight(420);
+      OBR.action.setHeight(500);
       setEstado(token ? ESTADOS.LISTO : ESTADOS.NO_VINCULADO);
       if (token) sincronizar();
     });
   }, [token, sincronizar]);
 
-  // Refresco periódico leve: actualiza el estado de caché (guardando → hecho) y sonando.
+  // Refresco periódico leve: caché (guardando → hecho), sonando, timeline, caché.
   useEffect(() => {
     if (estado !== ESTADOS.LISTO || !token) return;
     const id = setInterval(() => sincronizar(), 4000);
     return () => clearInterval(id);
   }, [estado, token, sincronizar]);
+
+  // Re-render cada segundo mientras suena, para mover el timeline suave.
+  const [, setTic] = useState(0);
+  useEffect(() => {
+    if (!sonando) return;
+    const id = setInterval(() => setTic((t) => t + 1), 1000);
+    return () => clearInterval(id);
+  }, [sonando]);
 
   async function vincular() {
     setVinculando(true);
@@ -138,8 +184,9 @@ export default function App() {
         body.loop = !!loops[id]; // repetir esta canción
       }
       await api(token)("/api/djgambit/play", { method: "POST", body: JSON.stringify(body) });
-      setSonando({ id, nombre });
+      setSonando({ id, nombre, inicioEn: Date.now(), duracionMs: null });
       setMensaje(`✓ Sonando: ${nombre}${catLoop ? ` · ${categoria} ↻` : loops[id] ? " · 🔁" : ""}`);
+      await sincronizar();
     } catch (e) {
       setError(e.message);
     } finally {
@@ -150,6 +197,22 @@ export default function App() {
   function cambiarCrossfade(v) {
     setCrossfadeS(v);
     localStorage.setItem("djgambit_crossfade_s", String(v));
+  }
+
+  function cambiarVolumen(v) {
+    setVolumen(v);
+    volumenAjustando.current = true;
+    clearTimeout(volumenTimer.current);
+    volumenTimer.current = setTimeout(async () => {
+      try {
+        const d = await api(token)("/api/djgambit/volumen", { method: "POST", body: JSON.stringify({ v }) });
+        setVolumen(d.volumen ?? v);
+      } catch (e) {
+        setError(e.message);
+      } finally {
+        volumenAjustando.current = false;
+      }
+    }, 300);
   }
 
   function alternarLoopCancion(id) {
@@ -184,6 +247,68 @@ export default function App() {
     }
   }
 
+  async function exportar() {
+    setError("");
+    setMensaje("");
+    try {
+      const d = await api(token)("/api/djgambit/menu/exportar");
+      const blob = new Blob([JSON.stringify({ canciones: d.canciones }, null, 2)], { type: "application/json" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "taberna-menu.json";
+      a.click();
+      URL.revokeObjectURL(a.href);
+      setMensaje(`⬇ Exportado el menú (${d.canciones.length} canciones).`);
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
+  async function importar(e) {
+    const archivo = e.target.files?.[0];
+    e.target.value = "";
+    if (!archivo) return;
+    setError("");
+    setMensaje("");
+    try {
+      const texto = await archivo.text();
+      const datos = JSON.parse(texto);
+      const lista = Array.isArray(datos) ? datos : datos.canciones;
+      if (!Array.isArray(lista)) throw new Error("Formato no reconocido (espera { canciones: [...] }).");
+      const d = await api(token)("/api/djgambit/menu/importar", { method: "POST", body: JSON.stringify({ canciones: lista }) });
+      setMensaje(`⬆ Importado: ${d.agregadas} añadidas, ${d.omitidas} omitidas (ya existían).`);
+      await sincronizar();
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
+  async function podar() {
+    if (!confirm("¿Podar la caché? Se borrarán las huérfanas (ya no en el menú) y descargas abandonadas.")) return;
+    setError("");
+    setMensaje("");
+    try {
+      const d = await api(token)("/api/djgambit/cache/podar", { method: "POST", body: JSON.stringify({}) });
+      setMensaje(`🧹 Caché podada: ${d.huerfanos} huérfanas y ${d.parciales} parciales viejas.`);
+      await sincronizar();
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
+  async function vaciar() {
+    if (!confirm("¿Vaciar TODA la caché? Habrá que volver a descargar las canciones.")) return;
+    setError("");
+    setMensaje("");
+    try {
+      const d = await api(token)("/api/djgambit/cache/vaciar", { method: "POST", body: JSON.stringify({}) });
+      setMensaje(`🧨 Caché vaciada (${d.eliminados} archivos).`);
+      await sincronizar();
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
   async function parar() {
     setError("");
     setMensaje("");
@@ -192,11 +317,33 @@ export default function App() {
       await api(token)("/api/djgambit/stop", { method: "POST", body: JSON.stringify({}) });
       setSonando(null);
       setMensaje("✓ Reproducción detenida");
+      await sincronizar();
     } catch (e) {
       setError(e.message);
     } finally {
       setCargandoId(null);
     }
+  }
+
+  function abrirNueva() {
+    setEditando(null);
+    setNueva({ nombre: "", icono: "", url: "", categoria: "" });
+    setMostrarForm(true);
+    setMostrarEmojis(false);
+  }
+
+  function editar(c) {
+    setEditando(c);
+    setNueva({ nombre: c.nombre, icono: c.icono, url: c.url, categoria: c.categoria });
+    setMostrarForm(true);
+    setMostrarEmojis(false);
+  }
+
+  function cancelarForm() {
+    setMostrarForm(false);
+    setEditando(null);
+    setNueva({ nombre: "", icono: "", url: "", categoria: "" });
+    setMostrarEmojis(false);
   }
 
   async function guardar() {
@@ -207,9 +354,14 @@ export default function App() {
       return;
     }
     try {
-      await api(token)("/api/djgambit/menu", { method: "POST", body: JSON.stringify(nueva) });
-      setNueva({ nombre: "", icono: "", url: "", categoria: "" });
-      setMostrarForm(false);
+      if (editando) {
+        await api(token)(`/api/djgambit/menu/${editando.id}`, { method: "PATCH", body: JSON.stringify(nueva) });
+        setMensaje("✓ Canción actualizada");
+      } else {
+        await api(token)("/api/djgambit/menu", { method: "POST", body: JSON.stringify(nueva) });
+        setMensaje("✓ Canción añadida");
+      }
+      cancelarForm();
       await sincronizar();
     } catch (e) {
       setError(e.message);
@@ -224,11 +376,47 @@ export default function App() {
     if (sonando?.id === id) setSonando(null);
   }
 
-  // Agrupar canciones por categoría, conservando el orden de inserción.
+  // Reordenar por drag & drop dentro de una categoría.
+  function onDragStart(cat, id) {
+    setArrastrando({ cat, id });
+  }
+
+  function onDragOver(e) {
+    e.preventDefault();
+  }
+
+  function onDrop(cat, objetivoId) {
+    if (!arrastrando || arrastrando.cat !== cat || arrastrando.id === objetivoId) {
+      setArrastrando(null);
+      return;
+    }
+    const mismoCat = (c) => (c.categoria || "Sin categoría") === cat;
+    const ids = canciones.filter(mismoCat).map((c) => c.id);
+    const desde = ids.indexOf(arrastrando.id);
+    const hasta = ids.indexOf(objetivoId);
+    setArrastrando(null);
+    if (desde < 0 || hasta < 0) return;
+    ids.splice(desde, 1);
+    ids.splice(hasta, 0, arrastrando.id);
+    const porId = new Map(canciones.map((c) => [c.id, c]));
+    const porCategoria = new Map();
+    for (const c of canciones) {
+      const k = c.categoria || "Sin categoría";
+      if (!porCategoria.has(k)) porCategoria.set(k, []);
+      porCategoria.get(k).push(c);
+    }
+    porCategoria.set(cat, ids.map((id) => porId.get(id)));
+    setCanciones([...porCategoria.values()].flat());
+    api(token)("/api/djgambit/menu/orden", { method: "POST", body: JSON.stringify({ ids }) }).catch((e) => setError(e.message));
+  }
+
+  // Agrupar canciones por categoría (respetando el orden) y filtrar por búsqueda.
   const grupos = useMemo(() => {
+    const q = busqueda.trim().toLowerCase();
     const orden = [];
     const mapa = new Map();
     for (const c of canciones) {
+      if (q && ![c.nombre, c.categoria, c.icono].some((t) => String(t ?? "").toLowerCase().includes(q))) continue;
       const cat = c.categoria || "Sin categoría";
       if (!mapa.has(cat)) {
         mapa.set(cat, []);
@@ -237,11 +425,15 @@ export default function App() {
       mapa.get(cat).push(c);
     }
     return orden.map((cat) => ({ cat, items: mapa.get(cat) }));
-  }, [canciones]);
+  }, [canciones, busqueda]);
 
+  const categoriasExistentes = useMemo(() => [...new Set(canciones.map((c) => c.categoria).filter(Boolean))], [canciones]);
   const cacheEnCurso = canciones.filter((c) => c.cacheando);
-
   const esSonando = (c) => sonando?.id === c.id;
+
+  const posMs = sonando?.inicioEn ? Math.max(0, Date.now() - sonando.inicioEn) : 0;
+  const durMs = sonando?.duracionMs ?? 0;
+  const progresoPct = durMs > 0 ? Math.min(100, (posMs / durMs) * 100) : 0;
 
   if (estado === ESTADOS.CARGANDO) {
     return <div className="app-row"><span className="aviso">Cargando…</span></div>;
@@ -285,6 +477,9 @@ export default function App() {
         <div className="cab-right">
           <div className="beta-badge" title="Versión experimental del panel — puede haber errores">BETA</div>
           <button className="boton boton-chico" onClick={cachearTodas} title="Descargar todas las canciones a caché" disabled={cargandoId !== null}>⬇</button>
+          <button className="boton boton-chico" onClick={exportar} title="Exportar menú (JSON)">📤</button>
+          <button className="boton boton-chico" onClick={() => archivoImportRef.current?.click()} title="Importar menú (JSON)">📥</button>
+          <input ref={archivoImportRef} type="file" accept="application/json,.json" style={{ display: "none" }} onChange={importar} />
           <div className="crossfade-control" title="Crossfade al cambiar de canción (segundos)">
             <span>🔀</span>
             <input
@@ -299,6 +494,34 @@ export default function App() {
           </div>
           <button className="boton boton-chico" onClick={desvincular} title="Desvincular este panel">⏻</button>
         </div>
+      </div>
+
+      <div className="barra">
+        <input
+          className="input buscar"
+          value={busqueda}
+          onChange={(e) => setBusqueda(e.target.value)}
+          placeholder="🔍 Buscar canción o categoría…"
+        />
+        <div className="volumen-control" title="Volumen de la sesión de voz del bot">
+          <span>🔊</span>
+          <input
+            type="range"
+            min="0"
+            max="100"
+            value={volumen}
+            onChange={(e) => cambiarVolumen(Number(e.target.value))}
+          />
+          <span className="volumen-val">{volumen}%</span>
+        </div>
+        {cacheInfo && (
+          <div className="cache-badge" title="Caché del bot en disco">
+            <span>💾 {cacheInfo.total} · {formatearBytes(cacheInfo.tamañoBytes)}{cacheInfo.cacheando > 0 ? ` · ${cacheInfo.cacheando} ⬇` : ""}</span>
+            {cacheInfo.huerfanos > 0 && <span className="cache-huerfanas"> · {cacheInfo.huerfanos} huérf.</span>}
+            <button className="boton boton-chico" onClick={podar} title="Podar caché (huérfanas + descargas abandonadas)">🧹</button>
+            <button className="boton boton-chico" onClick={vaciar} title="Vaciar toda la caché">🧨</button>
+          </div>
+        )}
       </div>
 
       <div className="mensajes">
@@ -328,7 +551,14 @@ export default function App() {
                 {g.items.map((c) => {
                   const loop = !!loops[c.id];
                   return (
-                    <div key={c.id} className={`escena ${cargandoId === c.id ? "escena-cargando" : ""} ${esSonando(c) ? "escena-sonando" : ""}`}>
+                    <div
+                      key={c.id}
+                      draggable
+                      onDragStart={() => onDragStart(g.cat, c.id)}
+                      onDragOver={onDragOver}
+                      onDrop={() => onDrop(g.cat, c.id)}
+                      className={`escena ${cargandoId === c.id ? "escena-cargando" : ""} ${esSonando(c) ? "escena-sonando" : ""} ${arrastrando?.id === c.id ? "escena-arrastrando" : ""}`}
+                    >
                       <button
                         className="escena-btn"
                         onClick={() => reproducir(c.id, c.nombre, c.categoria)}
@@ -358,6 +588,7 @@ export default function App() {
                       >
                         🔁
                       </button>
+                      <button className="editar" onClick={() => editar(c)} title="Editar canción">✏</button>
                       <button className="basura" onClick={() => borrar(c.id)} title="Quitar del menú">🗑</button>
                     </div>
                   );
@@ -369,17 +600,55 @@ export default function App() {
 
         {mostrarForm ? (
           <div className="form">
-            <input className="input" value={nueva.icono} onChange={(e) => setNueva({ ...nueva, icono: e.target.value })} placeholder="Icono (emoji)" maxLength={8} />
+            <div className="fila-emoji">
+              <input className="input" value={nueva.icono} onChange={(e) => setNueva({ ...nueva, icono: e.target.value })} placeholder="Emoji" maxLength={8} />
+              <button
+                className="boton boton-chico"
+                type="button"
+                onClick={() => setMostrarEmojis((m) => !m)}
+                title={mostrarEmojis ? "Ocultar emojis" : "Elegir un emoji de la lista"}
+              >
+                😀
+              </button>
+            </div>
+            {mostrarEmojis && (
+              <div className="emoji-picker">
+                {EMOJIS.map((e) => (
+                  <button
+                    key={e}
+                    type="button"
+                    className="emoji-opcion"
+                    onClick={() => {
+                      setNueva({ ...nueva, icono: e });
+                      setMostrarEmojis(false);
+                    }}
+                  >
+                    {e}
+                  </button>
+                ))}
+              </div>
+            )}
             <input className="input" value={nueva.nombre} onChange={(e) => setNueva({ ...nueva, nombre: e.target.value })} placeholder="Nombre" />
             <input className="input" value={nueva.url} onChange={(e) => setNueva({ ...nueva, url: e.target.value })} placeholder="URL de YouTube" />
-            <input className="input" value={nueva.categoria} onChange={(e) => setNueva({ ...nueva, categoria: e.target.value })} placeholder="Categoría (opcional)" />
+            <input
+              className="input"
+              value={nueva.categoria}
+              list="cats-datalist"
+              onChange={(e) => setNueva({ ...nueva, categoria: e.target.value })}
+              placeholder="Categoría (opcional)"
+            />
+            <datalist id="cats-datalist">
+              {categoriasExistentes.map((cat) => (
+                <option key={cat} value={cat} />
+              ))}
+            </datalist>
             <div className="fila">
-              <button className="boton boton-primario" onClick={guardar}>💾 Guardar</button>
-              <button className="boton" onClick={() => setMostrarForm(false)}>Cancelar</button>
+              <button className="boton boton-primario" onClick={guardar}>{editando ? "💾 Guardar cambios" : "💾 Guardar"}</button>
+              <button className="boton" onClick={cancelarForm}>Cancelar</button>
             </div>
           </div>
         ) : (
-          <button className="boton boton-nueva" onClick={() => setMostrarForm(true)} disabled={cargandoId !== null}>
+          <button className="boton boton-nueva" onClick={abrirNueva} disabled={cargandoId !== null}>
             ＋
           </button>
         )}
@@ -391,7 +660,13 @@ export default function App() {
             <span className="ok"><span className="spinner spinner-pequeno" /> Deteniendo…</span>
           ) : (
             <>
-              <span className="ok">▶ {sonando?.nombre}</span>
+              <span className="ok pies-sonando">▶ {sonando?.nombre}</span>
+              <div className="timeline" title={durMs ? `${formatearTiempo(posMs)} de ${formatearTiempo(durMs)}` : "Midiendo duración…"}>
+                <div className="timeline-barra">
+                  <div className="timeline-lleno" style={{ width: `${progresoPct}%` }} />
+                </div>
+                <span className="timeline-tiempo">{durMs > 0 ? `${formatearTiempo(posMs)} / ${formatearTiempo(durMs)}` : formatearTiempo(posMs)}</span>
+              </div>
               <button className="boton boton-parar" onClick={parar} disabled={cargandoId !== null}>⏹</button>
             </>
           )}
