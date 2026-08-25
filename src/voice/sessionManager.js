@@ -274,6 +274,7 @@ export function parar(guildId) {
   clearTimeout(s.temporizadorVacio);
   s.mixer.detener();
   try { s.player.stop(); } catch {}
+  try { s.ffEnc.kill("SIGTERM"); } catch {}
   try { s.connection.destroy(); } catch {}
   sesiones.delete(guildId);
   return true;
@@ -392,15 +393,25 @@ export function agregarFuente(guildId, { id, url, volumen = 1, loop = false, loo
   if (!s) return null;
   if (s.fuentes.has(id)) _quitarFuenteDeSesion(s, id);
 
+  console.log(`🎵 agregarFuente(${id}, tipo=${tipo}, url=${url?.slice(0, 60)}) en ${s.guild?.name ?? guildId}`);
   s.mixer.agregarFuente(id, clampVolumen(volumen));
   let resolvePrimer, rejectPrimer;
   const promesa = new Promise((res, rej) => { resolvePrimer = res; rejectPrimer = rej; });
 
+  let primerChunkLog = false;
   const pipeline = fabricaPipelines.crearPipeline({
     url,
     loop,
     loopDelayMs,
     onDatos: (bytes) => {
+      if (!primerChunkLog) {
+        primerChunkLog = true;
+        console.log(`🎵 Primer chunk PCM de ${id}: ${bytes.length} bytes, mixer fuentes=${s.mixer.fuentes.size}, ffEnc alive=${!s.ffEnc.killed}`);
+        // Diagnóstico: verificar que el audio fluye 5 s después
+        setTimeout(() => {
+          console.log(`🎵 Diag 5s: mixer.fuentes=${s.mixer.fuentes.size}, fuentes activas=${[...s.fuentes.keys()]}, ffEnc alive=${!s.ffEnc?.killed}, player=${s.player.state?.status}, underruns=${s.mixer.underruns}, emitidos=${s.mixer._emitidos}`);
+        }, 5000).unref?.();
+      }
       return s.mixer.empujar(id, bytes); // false → el pipeline pausa su ffmpeg
     },
     onFin: () => {
