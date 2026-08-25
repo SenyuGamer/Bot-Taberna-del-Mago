@@ -6,6 +6,7 @@ import {
   StreamType,
   entersState,
   VoiceConnectionStatus,
+  VoiceConnectionDisconnectReason,
 } from "@discordjs/voice";
 import { PermissionsBitField } from "discord.js";
 import { Mixer, clampVolumen } from "./mixer.js";
@@ -134,6 +135,35 @@ export async function unir(guild, canal, clientId, usuarioId = null, usuarioNomb
       // La conexión se cayó/cerró: si hay música sonando intentamos reconectar
       // solos (limita con un contador); si no, limpiamos la sesión.
       if (sesiones.get(guild.id) === sesion) _trasCaida(sesion, "conexión destruida");
+    }
+  });
+  // Manejo explícito de Disconnected: cuando Discord re-clavifica DAVE o migra
+  // el voice server (p.ej. al hablar), la conexión pasa por Disconnected antes
+  // de reconectar. Si es un cierre permanente (4014/kicked, 4021/replaced,
+  // 4022/invalidated), no intentamos reconectar. Para el resto, esperamos a
+  // que la librería reconecte sola; si no lo hace en 20 s, destruimos y limpiamos.
+  const CODIGOS_NO_RECONECTAR = new Set([4014, 4021, 4022]);
+  connection.on(VoiceConnectionStatus.Disconnected, async (oldState, newState) => {
+    const razon = newState.reason;
+    const closeCode = newState.closeCode;
+    console.log(`🎵 Voz (${guild.name}): desconectado — reason=${razon}, closeCode=${closeCode}`);
+
+    if (razon === VoiceConnectionDisconnectReason.WebSocketClose && CODIGOS_NO_RECONECTAR.has(closeCode)) {
+      console.log(`🎵 Voz (${guild.name}): desconexión permanente (code ${closeCode}), limpiando sesión.`);
+      if (sesiones.get(guild.id) === sesion) parar(guild.id);
+      return;
+    }
+    // Para el resto de razones, la librería intenta reconectar sola
+    // (transiciona a Signalling → Connecting → Ready). Le damos 20 s.
+    try {
+      await Promise.race([
+        entersState(connection, VoiceConnectionStatus.Ready, 20_000),
+        entersState(connection, VoiceConnectionStatus.Signalling, 20_000),
+      ]);
+      console.log(`🎵 Voz (${guild.name}): reconectada tras desconexión transitoria.`);
+    } catch {
+      console.log(`🎵 Voz (${guild.name}): no pude reconectar tras desconexión (timeout 20 s).`);
+      if (sesiones.get(guild.id) === sesion) _trasCaida(sesion, "desconexión sin reconexión");
     }
   });
   connection.on("error", (error) => {

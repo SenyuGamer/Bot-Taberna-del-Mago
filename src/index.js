@@ -56,12 +56,15 @@ client.on("voiceStateUpdate", (oldState, newState) => {
   }
 });
 
-// Debug de eventos crudos de voz del gateway
+// Debug de eventos crudos de voz del gateway (resumido para no inundar el journal)
 client.ws.on("VOICE_SERVER_UPDATE", (data) => {
-  console.log("🎤 Discord.js raw VOICE_SERVER_UPDATE:", JSON.stringify(data));
+  console.log("🎤 VOICE_SERVER_UPDATE:", { guild: data.guild_id, endpoint: data.endpoint ? "ok" : "null" });
 });
 client.ws.on("VOICE_STATE_UPDATE", (data) => {
-  console.log("🎤 Discord.js raw VOICE_STATE_UPDATE:", JSON.stringify(data));
+  const user = data.member?.user?.username ?? data.user_id;
+  const action = data.channel_id ? "join" : "leave";
+  const mute = data.self_mute ? "muted" : "unmuted";
+  console.log(`🎤 VOICE_STATE_UPDATE: ${user} ${action} (${mute}) guild=${data.guild_id} ch=${data.channel_id ?? "null"}`);
 });
 
 client.on("interactionCreate", async (interaction) => {
