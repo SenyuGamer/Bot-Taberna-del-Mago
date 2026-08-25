@@ -568,6 +568,24 @@
 
 .editar:hover { opacity: 1; background: rgba(129, 77, 222, 0.7); }
 
+/* Botón de guardar canción caché en el menú */
+.guardar-cache {
+  position: absolute;
+  bottom: 5px;
+  left: 5px;
+  border: 0;
+  background: rgba(0, 0, 0, 0.55);
+  border-radius: 10px;
+  font-size: 15px;
+  line-height: 1;
+  padding: 4px 6px;
+  cursor: pointer;
+  opacity: 0.9;
+  transition: opacity 100ms linear, background-color 100ms linear;
+}
+
+.guardar-cache:hover { opacity: 1; background: rgba(125, 211, 153, 0.7); }
+
 /* Drag & drop */
 .escena[draggable="true"] {
   cursor: grab;

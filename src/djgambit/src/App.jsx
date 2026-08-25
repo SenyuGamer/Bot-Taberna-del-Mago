@@ -86,6 +86,12 @@ export default function App() {
   const [arrastrando, setArrastrando] = useState(null); // { cat, id }
   const [destacadaId, setDestacadaId] = useState(null); // canción recién añadida (para resaltarla)
   const [controlInfo, setControlInfo] = useState(null); // { userId, nombre, eresTu } — quién controla la música
+  const [cacheManual, setCacheManual] = useState([]); // canciones de /musica url (caché del panel)
+  const [colapsadas, setColapsadas] = useState(() => {
+    try { return new Set(JSON.parse(localStorage.getItem("djgambit_colapsadas") || "[]")); } catch { return new Set(); }
+  });
+  const [guardandoCacheId, setGuardandoCacheId] = useState(null); // id de la canción caché que se está guardando
+  const [formCache, setFormCache] = useState({ nombre: "", icono: "", categoria: "" });
 
   const ultimoJson = useRef("");
   const volumenAjustando = useRef(false);
@@ -96,10 +102,11 @@ export default function App() {
     if (!token) return;
     const f = api(token);
     try {
-      const [menuR, estR] = await Promise.allSettled([f("/api/djgambit/menu"), f("/api/djgambit/estado")]);
+      const [menuR, estR, cacheR] = await Promise.allSettled([f("/api/djgambit/menu"), f("/api/djgambit/estado"), f("/api/djgambit/cached")]);
       if (menuR.status === "rejected") throw menuR.reason;
       const canc = menuR.value.canciones ?? [];
       const est = estR.status === "fulfilled" ? estR.value : null;
+      const cacheMan = cacheR.status === "fulfilled" ? (cacheR.value.canciones ?? []) : [];
       const sig = JSON.stringify({
         canc,
         sonando: est?.sonando ? { id: est.cancionId, nombre: est.nombre, inicioEn: est.inicioEn, duracionMs: est.duracionMs } : null,
@@ -107,10 +114,12 @@ export default function App() {
         cacheando: est?.cacheando ?? [],
         vol: est?.volumen ?? 100,
         control: est?.control ?? null,
+        cacheManual: cacheMan,
       });
       if (sig !== ultimoJson.current) {
         ultimoJson.current = sig;
         setCanciones(canc);
+        setCacheManual(cacheMan);
         if (est) {
           setSonando(est.sonando ? { id: est.cancionId, nombre: est.nombre, inicioEn: est.inicioEn, duracionMs: est.duracionMs } : null);
           setCacheInfo({ ...(est.cache ?? {}), cacheando: (est.cacheando ?? []).length });
@@ -339,6 +348,58 @@ export default function App() {
     } finally {
       setCargandoId(null);
     }
+  }
+
+  async function reproducirCache(id, nombre) {
+    setCargandoId(`cache-${id}`);
+    setError("");
+    setMensaje("");
+    try {
+      await api(token)("/api/djgambit/cached/play", { method: "POST", body: JSON.stringify({ id, crossfade: crossfadeS }) });
+      setSonando({ id, nombre, inicioEn: Date.now(), duracionMs: null });
+      setMensaje(`✓ Sonando: ${nombre}`);
+      await sincronizar();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setCargandoId(null);
+    }
+  }
+
+  function abrirGuardarCache(c) {
+    setGuardandoCacheId(c.id);
+    setFormCache({ nombre: c.nombre, icono: "🎵", categoria: "" });
+  }
+
+  async function guardarCache() {
+    if (!guardandoCacheId) return;
+    setError("");
+    setMensaje("");
+    if (!formCache.nombre.trim()) {
+      setError("Escribe un nombre para la canción.");
+      return;
+    }
+    try {
+      await api(token)("/api/djgambit/cached/save", {
+        method: "POST",
+        body: JSON.stringify({ id: guardandoCacheId, ...formCache }),
+      });
+      setMensaje(`✓ Canción guardada en el menú: ${formCache.nombre}`);
+      setGuardandoCacheId(null);
+      await sincronizar();
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
+  function alternarColapsada(cat) {
+    setColapsadas((prev) => {
+      const nuevo = new Set(prev);
+      if (nuevo.has(cat)) nuevo.delete(cat);
+      else nuevo.add(cat);
+      localStorage.setItem("djgambit_colapsadas", JSON.stringify([...nuevo]));
+      return nuevo;
+    });
   }
 
   function abrirNueva() {
@@ -592,17 +653,57 @@ export default function App() {
       </div>
 
       <div className="escenario">
+        {cacheManual.length > 0 && (
+          <div className="cat">
+            <div className={`cat-cab ${arrastrando ? "cat-cab-destino" : ""}`}>
+              <span className="cat-nombre" onClick={() => alternarColapsada("__cache__")} style={{ cursor: "pointer" }}>
+                {colapsadas.has("__cache__") ? "▸" : "▾"} ⚡ Caché ({cacheManual.length})
+              </span>
+            </div>
+            {!colapsadas.has("__cache__") && (
+              <div className="cat-fila">
+                {cacheManual.map((c) => (
+                  <div
+                    key={c.id}
+                    id={`cache-${c.id}`}
+                    className={`escena ${cargandoId === `cache-${c.id}` ? "escena-cargando" : ""} ${esSonando(c) ? "escena-sonando" : ""}`}
+                  >
+                    <button
+                      className="escena-btn"
+                      onClick={() => reproducirCache(c.id, c.nombre)}
+                      disabled={cargandoId !== null && cargandoId !== `cache-${c.id}`}
+                      title={`Reproducir: ${c.url}`}
+                    >
+                      {cargandoId === `cache-${c.id}` ? (
+                        <span className="spinner" />
+                      ) : (
+                        <span className="icono">⚡</span>
+                      )}
+                      <span className="escena-fila">
+                        <span className="nombre">{c.nombre}</span>
+                        <span className="badge">{esSonando(c) ? "▶" : ""}</span>
+                      </span>
+                    </button>
+                    <button className="guardar-cache" onClick={() => abrirGuardarCache(c)} title="Guardar en el menú">💾</button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         {grupos.map((g) => {
           const catLoop = !!cats[g.cat];
           return (
             <div className="cat" key={g.cat}>
-              <div
-                className={`cat-cab ${arrastrando ? "cat-cab-destino" : ""}`}
-                onDragOver={onDragOver}
-                onDrop={() => onDrop(g.cat, null)}
-                title={arrastrando ? `Mover aquí (${g.cat})` : undefined}
-              >
-                <span className="cat-nombre">▸ {g.cat}</span>
+              <div className={`cat-cab ${arrastrando ? "cat-cab-destino" : ""}`}
+              onDragOver={onDragOver}
+              onDrop={() => onDrop(g.cat, null)}
+              title={arrastrando ? `Mover aquí (${g.cat})` : undefined}
+            >
+              <span className="cat-nombre" onClick={() => alternarColapsada(g.cat)} style={{ cursor: "pointer" }}>
+                {colapsadas.has(g.cat) ? "▸" : "▾"} {g.cat}
+              </span>
                 <label
                   className={`toggle toggle-cat ${catLoop ? "activa" : ""}`}
                   title={catLoop ? "Playlist de esta categoría activa (bucle)" : "Reproducir toda la categoría en bucle (playlist)"}
@@ -611,6 +712,7 @@ export default function App() {
                   <span className="cat-loop-ico">↻</span>
                 </label>
               </div>
+              {!colapsadas.has(g.cat) && (
               <div className="cat-fila">
                 {g.items.map((c) => {
                   const loop = !!loops[c.id];
@@ -659,6 +761,7 @@ export default function App() {
                   );
                 })}
               </div>
+              )}
             </div>
           );
         })}
@@ -717,6 +820,42 @@ export default function App() {
             <div className="fila">
               <button className="boton boton-primario" onClick={guardar}>{editando ? "💾 Guardar cambios" : "💾 Guardar"}</button>
               <button className="boton" onClick={cancelarForm}>Cancelar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {guardandoCacheId && (
+        <div className="form-overlay" onClick={() => setGuardandoCacheId(null)}>
+          <div className="form" onClick={(e) => e.stopPropagation()}>
+            <div className="form-titulo">💾 Guardar canción en el menú</div>
+            <div className="fila-emoji">
+              <input className="input" value={formCache.icono} onChange={(e) => setFormCache({ ...formCache, icono: e.target.value })} placeholder="Emoji" maxLength={8} />
+              <button
+                className="boton boton-chico"
+                type="button"
+                onClick={() => setFormCache({ ...formCache, icono: formCache.icono === "⚡" ? "🎵" : "⚡" })}
+                title="Alternar emoji"
+              >
+                😀
+              </button>
+            </div>
+            <input className="input" value={formCache.nombre} onChange={(e) => setFormCache({ ...formCache, nombre: e.target.value })} placeholder="Nombre" />
+            <input
+              className="input"
+              value={formCache.categoria}
+              list="cats-datalist-cache"
+              onChange={(e) => setFormCache({ ...formCache, categoria: e.target.value })}
+              placeholder="Categoría (opcional)"
+            />
+            <datalist id="cats-datalist-cache">
+              {categoriasExistentes.map((cat) => (
+                <option key={cat} value={cat} />
+              ))}
+            </datalist>
+            <div className="fila">
+              <button className="boton boton-primario" onClick={guardarCache}>💾 Guardar</button>
+              <button className="boton" onClick={() => setGuardandoCacheId(null)}>Cancelar</button>
             </div>
           </div>
         </div>

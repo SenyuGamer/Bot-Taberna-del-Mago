@@ -161,6 +161,25 @@ export async function unir(guild, canal, clientId, usuarioId = null, usuarioNomb
         entersState(connection, VoiceConnectionStatus.Signalling, 20_000),
       ]);
       console.log(`🎵 Voz (${guild.name}): reconectada tras desconexión transitoria.`);
+      // DAVE rekeying: el socket UDP murió y se recreó. El resource/player
+      // viejos están ligados al socket muerto. Si el player se quedó en idle
+      // (o nunca llegó audio), recreamos encoder+resource para restaurar el
+      // sonido SIN tocar mixer ni pipeline (siguen vivos).
+      if (sesiones.get(guild.id) === sesion) {
+        const PlayerStatus = sesion.player.state?.status;
+        if (PlayerStatus === "idle" || sesion.fuentes.size > 0) {
+          try { sesion.ffEnc.kill("SIGTERM"); } catch {}
+          sesion.recargasEncoder++;
+          const ffNuevo = crearEncoderOpus({ onError: (e) => console.error(`🎵 ${e.message}`) });
+          sesion.ffEnc = ffNuevo;
+          sesion.ffNuevo = ffNuevo;
+          try { sesion.mixer.salida.pipe(ffNuevo.stdin); } catch {}
+          const recursoNuevo = createAudioResource(ffNuevo.stdout, { inputType: StreamType.OggOpus });
+          sesion.recurso = recursoNuevo;
+          try { sesion.player.play(recursoNuevo); } catch {}
+          console.log(`🎵 Voz (${guild.name}): encoder+resource recreados tras reconexión DAVE.`);
+        }
+      }
     } catch {
       console.log(`🎵 Voz (${guild.name}): no pude reconectar tras desconexión (timeout 20 s).`);
       if (sesiones.get(guild.id) === sesion) _trasCaida(sesion, "desconexión sin reconexión");
@@ -196,6 +215,8 @@ export async function unir(guild, canal, clientId, usuarioId = null, usuarioNomb
     crossfadeTimer: null,
     menuPlaylist: null, // { categoria, canciones, indice } — playlist por categoría activa
     timeline: null, // { nombre, inicioEn, duracionMs } de la canción del menú sonando
+    cacheManual: [], // canciones de /musica url que se muestran en el panel
+    currentSection: null, // sección activa para controlar crossfade entre secciones
   };
   if (!sinControl && usuarioId) {
     sesion.controlUserId = usuarioId;
@@ -209,8 +230,11 @@ export async function unir(guild, canal, clientId, usuarioId = null, usuarioNomb
 
   // Auto-reparación: si el encoder opus muere (p. ej. "Broken pipe"), lo recargamos
   // sin descolgar la conexión para que la música vuelva sola.
-  ffEnc.on("close", (code) => {
+  // Capturamos la referencia al encoder al crear el handler para que, si el encoder
+  // fue reemplazado por la recuperación DAVE, el handler viejo no interfere.
+  const _crearHandlerCierre = (miEncoder) => (code) => {
     if (sesiones.get(guild.id) !== sesion) return; // sesión ya cerrada (parar)
+    if (sesion.ffEnc !== miEncoder) return; // encoder ya fue reemplazado (recuperación DAVE)
     if (code === 0) return; // cierre limpio (p. ej. al detener)
     if (sesion.recargasEncoder >= 5) {
       console.error(`🎵 Encoder opus se cerró ${sesion.recargasEncoder} veces; parando sesión de ${guild.name}.`);
@@ -229,7 +253,8 @@ export async function unir(guild, canal, clientId, usuarioId = null, usuarioNomb
     } catch (e) {
       console.error("🎵 No pude reiniciar el reproductor:", e.message);
     }
-  });
+  };
+  ffEnc.on("close", _crearHandlerCierre(ffEnc));
 
   try {
     await entersState(connection, VoiceConnectionStatus.Ready, 20_000);
@@ -344,6 +369,10 @@ function _quitarFuenteDeSesion(s, id) {
   try { fuente.pipeline?.detener(); } catch {}
   s.fuentes.delete(id);
   s.mixer.quitarFuente(id);
+  // Mantener cacheManual sincronizado: al quitar una fuente manual, borrarla de la caché del panel.
+  if (fuente.tipo === "manual") {
+    s.cacheManual = s.cacheManual.filter((c) => c.id !== id);
+  }
 }
 
 export function quitarFuente(guildId, id) {
@@ -388,6 +417,12 @@ export function agregarFuente(guildId, { id, url, volumen = 1, loop = false, loo
   s.fuentes.set(id, { id, url, tipo, loop, volumen: clampVolumen(volumen), userId, nombre, cancionId, pipeline });
   pipeline.esperarPrimerAudio?.().then(resolvePrimer).catch(rejectPrimer);
 
+  // Mantener cacheManual sincronizado: las fuentes manuales (/musica url) se muestran en el panel.
+  if (tipo === "manual") {
+    s.cacheManual = s.cacheManual.filter((c) => c.id !== id);
+    s.cacheManual.push({ id, url, nombre: nombre || url, userId });
+  }
+
   return { promesa };
 }
 
@@ -402,6 +437,12 @@ export function quitarFuentesManuales(guildId, { soloDe = null } = {}) {
     quitadas++;
   }
   return quitadas;
+}
+
+/** Devuelve la caché de canciones manuales del panel (las de /musica url). */
+export function getCacheManual(guildId) {
+  const s = sesiones.get(guildId);
+  return s ? s.cacheManual : [];
 }
 
 // ---------- Control por turnos del menú (varios DMs pueden vincular) ----------
@@ -430,14 +471,14 @@ export function revisarControl(guildId, usuarioId) {
  */
 const PASOS_CROSSFADE = 20;
 
-export function reproducirCancionMenu(guildId, { id = null, url, nombre = "", loop = false, crossfadeMs = 0, usuarioId = null, usuarioNombre = "" }) {
+export function reproducirCancionMenu(guildId, { id = null, url, nombre = "", loop = false, crossfadeMs = 0, usuarioId = null, usuarioNombre = "", section = null }) {
   const s = sesiones.get(guildId);
   if (!s) return null;
   const bloqueo = _revisarControl(s, usuarioId);
   if (bloqueo) return { error: bloqueo };
   s.menuPlaylist = null; // una reproducción manual cancela el modo lista (playlist por categoría)
   if (usuarioId) { s.controlUserId = usuarioId; s.controlNombre = usuarioNombre || null; }
-  return _ponerCancionActiva(s, { id, url, nombre, loop }, crossfadeMs);
+  return _ponerCancionActiva(s, { id, url, nombre, loop }, crossfadeMs, section);
 }
 
 /** Reproduce una canción concreta del menú y avanza la playlist al acabar. */
@@ -449,7 +490,7 @@ function _marcarTimeline(s, { id, url, nombre }) {
   });
 }
 
-function _ponerCancionActiva(s, { id, url, nombre, loop }, crossfadeMs) {
+function _ponerCancionActiva(s, { id, url, nombre, loop }, crossfadeMs, section = null) {
   // Durante una transición la "activa" sigue siendo la vieja; la nueva entra como "menu:transicion".
   if (s.fuentes.has("menu:transicion")) {
     _quitarFuenteDeSesion(s, "menu:transicion");
@@ -457,6 +498,13 @@ function _ponerCancionActiva(s, { id, url, nombre, loop }, crossfadeMs) {
   }
 
   const activa = s.fuentes.get("menu:activa");
+
+  // Crossfade solo dentro de la misma sección (categoría o apartado).
+  // Si la sección es distinta → corte directo sin crossfade.
+  if (section && s.currentSection && section !== s.currentSection) {
+    crossfadeMs = 0;
+  }
+  if (section) s.currentSection = section;
 
   // El menú reproduce una canción a la vez (id estable "menu:activa").
   // Sin canción previa o sin crossfade: reemplazo directo.
@@ -554,8 +602,9 @@ export function reproducirPlaylistCategoria(guildId, { categoria = "", canciones
   }
   s.menuPlaylist = { categoria, canciones, indice: idx };
   if (usuarioId) { s.controlUserId = usuarioId; s.controlNombre = usuarioNombre || null; }
+  const section = categoria || "sin-categoria";
   const primera = canciones[idx];
-  return _ponerCancionActiva(s, { id: primera.id, url: primera.url, nombre: primera.nombre, loop: false }, 0);
+  return _ponerCancionActiva(s, { id: primera.id, url: primera.url, nombre: primera.nombre, loop: false }, 0, section);
 }
 
 /** Al acabar una canción del menú, pasa a la siguiente de la playlist (y da la vuelta = loop). */
@@ -566,7 +615,8 @@ function _avanzarPlaylistPorFin(guildId) {
   const siguiente = (pl.indice + 1) % pl.canciones.length;
   pl.indice = siguiente;
   const c = pl.canciones[siguiente];
-  _ponerCancionActiva(s, { id: c.id, url: c.url, nombre: c.nombre, loop: false }, 0);
+  const section = pl.categoria || "sin-categoria";
+  _ponerCancionActiva(s, { id: c.id, url: c.url, nombre: c.nombre, loop: false }, 0, section);
 }
 
 /** Detiene la canción del menú si estaba sonando. */
@@ -578,6 +628,7 @@ export function pararCancionMenu(guildId) {
   s.timeline = null;
   s.controlUserId = null;
   s.controlNombre = null;
+  s.currentSection = null;
   onCambioSonando?.(null);
   let quitada = false;
   for (const id of ["menu:activa", "menu:transicion"]) {

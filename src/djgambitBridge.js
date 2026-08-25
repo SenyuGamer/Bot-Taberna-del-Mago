@@ -12,7 +12,7 @@ import {
   actualizarCancionMenu,
   setOrdenCancionesMenu,
 } from "./db.js";
-import { reproducirCancionMenu, reproducirPlaylistCategoria, pararCancionMenu, estadoCancionMenu, getSesion, unir, canalGuardado, revisarControl, setOnCambioSonando } from "./voice/sessionManager.js";
+import { reproducirCancionMenu, reproducirPlaylistCategoria, pararCancionMenu, estadoCancionMenu, getSesion, unir, canalGuardado, revisarControl, setOnCambioSonando, getCacheManual } from "./voice/sessionManager.js";
 import { precargarCache, existeCache, borrarCache, estadoCache, vaciarCache, podarCache } from "./voice/pipeline.js";
 
 // Precargas en curso por URL (evita descargar la misma canciÃ³n dos veces a la vez).
@@ -139,7 +139,7 @@ function dmDeToken(req) {
  * Reproduce una canción del menú en el guild vinculado. Si el bot no está en el
  * canal de voz, intenta unirse al que haya guardado (/musica unir anterior).
  */
-async function reproducirConSesion(req, res, guildId, cancion, crossfadeMs = 0, loop = false, loopCategoria = false, dmId = null, dmNombre = "") {
+async function reproducirConSesion(req, res, guildId, cancion, crossfadeMs = 0, loop = false, loopCategoria = false, dmId = null, dmNombre = "", section = null) {
   const bloqueo = revisarControl(guildId, dmId);
   if (bloqueo) return res.status(409).json({ ok: false, error: bloqueo });
 
@@ -186,6 +186,7 @@ async function reproducirConSesion(req, res, guildId, cancion, crossfadeMs = 0, 
         crossfadeMs,
         usuarioId: dmId,
         usuarioNombre: dmNombre,
+        section,
       });
     }
     if (!creado) return res.status(409).json({ ok: false, error: "No hay sesión de voz activa." });
@@ -375,7 +376,7 @@ app.delete("/api/djgambit/menu/:id", (req, res) => {
     const guildId = guildDeToken(req);
     const dmId = dmDeToken(req);
     if (!guildId) return res.status(401).json({ ok: false, error: "Panel no vinculado a un servidor. Usa /musica vincular." });
-    const { id, crossfade = 0, loop = false, loopCategoria = false } = req.body ?? {};
+    const { id, crossfade = 0, loop = false, loopCategoria = false, section = null } = req.body ?? {};
     const cancion = id ? getCancionMenu(Number(id)) : null;
     if (!cancion) return res.status(404).json({ ok: false, error: "Canción no encontrada en el menú." });
 
@@ -383,7 +384,7 @@ app.delete("/api/djgambit/menu/:id", (req, res) => {
 
     setImmediate(() => {
       const ms = Number(crossfade) > 0 ? Number(crossfade) * 1000 : 0;
-      reproducirConSesion(req, res, guildId, cancion, ms, !!loop, !!loopCategoria, dmId, dmNombre);
+      reproducirConSesion(req, res, guildId, cancion, ms, !!loop, !!loopCategoria, dmId, dmNombre, section);
     });
   });
 
@@ -428,6 +429,75 @@ app.delete("/api/djgambit/menu/:id", (req, res) => {
     if (!s) return res.status(409).json({ ok: false, error: "No hay sesión de voz activa.", volumen: 100 });
     s.mixer.setVolumenGlobal(v / 100);
     res.json({ ok: true, volumen: v });
+  });
+
+  // ---------- Caché de canciones manuales (las de /musica url) ----------
+
+  app.get("/api/djgambit/cached", (req, res) => {
+    const guildId = guildDeToken(req);
+    if (!guildId) return res.status(401).json({ ok: false, error: "Panel no vinculado. Usa /musica vincular." });
+    res.json({ ok: true, canciones: getCacheManual(guildId) });
+  });
+
+  app.post("/api/djgambit/cached/play", (req, res) => {
+    const guildId = guildDeToken(req);
+    const dmId = dmDeToken(req);
+    if (!guildId) return res.status(401).json({ ok: false, error: "Panel no vinculado. Usa /musica vincular." });
+    const { id, crossfade = 0 } = req.body ?? {};
+    const canciones = getCacheManual(guildId);
+    const cancion = id ? canciones.find((c) => c.id === id) : null;
+    if (!cancion) return res.status(404).json({ ok: false, error: "Canción no encontrada en la caché." });
+
+    const dmNombre = dmId ? (clienteActual?.guilds?.cache?.get(guildId)?.members?.cache?.get(dmId)?.displayName ?? "") : "";
+    const ms = Number(crossfade) > 0 ? Number(crossfade) * 1000 : 0;
+
+    setImmediate(async () => {
+      try {
+        const sesion = getSesion(guildId);
+        if (!sesion) return res.status(409).json({ ok: false, error: "No hay sesión de voz activa." });
+        const bloqueo = revisarControl(guildId, dmId);
+        if (bloqueo) return res.status(409).json({ ok: false, error: bloqueo });
+        const creado = reproducirCancionMenu(guildId, {
+          id: cancion.id,
+          url: cancion.url,
+          nombre: cancion.nombre,
+          crossfadeMs: ms,
+          usuarioId: dmId,
+          usuarioNombre: dmNombre,
+          section: "manual",
+        });
+        if (!creado) return res.status(409).json({ ok: false, error: "No hay sesión de voz activa." });
+        if (creado.error) return res.status(409).json({ ok: false, error: creado.error });
+        await creado.promesa;
+        res.json({ ok: true, cancion: { id: cancion.id, nombre: cancion.nombre } });
+      } catch (error) {
+        console.error(`🎵 Error reproduciendo caché ${cancion.nombre}:`, error.message);
+        res.status(502).json({ ok: false, error: `No pude reproducir: ${error.message}` });
+      }
+    });
+  });
+
+  app.post("/api/djgambit/cached/save", (req, res) => {
+    const guildId = guildDeToken(req);
+    if (!guildId) return res.status(401).json({ ok: false, error: "Panel no vinculado. Usa /musica vincular." });
+    const { id, nombre, icono = "", categoria = "" } = req.body ?? {};
+    const canciones = getCacheManual(guildId);
+    const cancion = id ? canciones.find((c) => c.id === id) : null;
+    if (!cancion) return res.status(404).json({ ok: false, error: "Canción no encontrada en la caché." });
+    if (!nombre?.trim()) return res.status(400).json({ ok: false, error: "Nombre es obligatorio." });
+
+    const guardada = agregarCancionMenu({
+      nombre: nombre.trim(),
+      icono: String(icono),
+      url: cancion.url,
+      categoria: String(categoria),
+    });
+    console.log(`🎵 Canción de caché guardada en menú: ${guardada.nombre} <${cancion.url}>`);
+
+    // Auto-caché a disco en segundo plano.
+    _asegurarPrecarga(cancion.url).catch(() => {});
+
+    res.json({ ok: true, cancion: { ...guardada, cacheado: existeCache({ url: cancion.url }), cacheando: precargas.has(cancion.url) } });
   });
 
   // ---------- PrÃ©-cachÃ© de todo el menÃº (descarga en segundo plano) ----------
