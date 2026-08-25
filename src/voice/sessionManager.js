@@ -394,6 +394,9 @@ export function agregarFuente(guildId, { id, url, volumen = 1, loop = false, loo
   if (s.fuentes.has(id)) _quitarFuenteDeSesion(s, id);
 
   console.log(`🎵 agregarFuente(${id}, tipo=${tipo}, url=${url?.slice(0, 60)}) en ${s.guild?.name ?? guildId}`);
+  // Fuentes manuales (/musica url) y menú (Owlbear) son mutuamente excluyentes:
+  // al añadir una fuente manual, paramos el menú; al añadir menú, las manuales se paran arriba.
+  if (tipo === "manual") pararCancionMenu(guildId);
   s.mixer.agregarFuente(id, clampVolumen(volumen));
   let resolvePrimer, rejectPrimer;
   const promesa = new Promise((res, rej) => { resolvePrimer = res; rejectPrimer = rej; });
@@ -489,6 +492,9 @@ export function reproducirCancionMenu(guildId, { id = null, url, nombre = "", lo
   if (bloqueo) return { error: bloqueo };
   s.menuPlaylist = null; // una reproducción manual cancela el modo lista (playlist por categoría)
   if (usuarioId) { s.controlUserId = usuarioId; s.controlNombre = usuarioNombre || null; }
+  // El menú y las fuentes manuales (/musica url) son mutuamente excluyentes:
+  // al reproducir una canción del menú, paramos todas las manuales.
+  quitarFuentesManuales(guildId);
   return _ponerCancionActiva(s, { id, url, nombre, loop }, crossfadeMs, section);
 }
 
@@ -599,6 +605,7 @@ export function reproducirPlaylistCategoria(guildId, { categoria = "", canciones
     _quitarFuenteDeSesion(s, "menu:transicion");
     if (s.crossfadeTimer) { clearInterval(s.crossfadeTimer); s.crossfadeTimer = null; }
   }
+  quitarFuentesManuales(guildId);
   let idx = 0;
   if (inicioId != null) {
     const hallado = canciones.findIndex((c) => c.id === inicioId);
