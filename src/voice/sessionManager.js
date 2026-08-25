@@ -499,13 +499,6 @@ function _ponerCancionActiva(s, { id, url, nombre, loop }, crossfadeMs, section 
 
   const activa = s.fuentes.get("menu:activa");
 
-  // Crossfade solo dentro de la misma sección (categoría o apartado).
-  // Si la sección es distinta → corte directo sin crossfade.
-  if (section && s.currentSection && section !== s.currentSection) {
-    crossfadeMs = 0;
-  }
-  if (section) s.currentSection = section;
-
   // El menú reproduce una canción a la vez (id estable "menu:activa").
   // Sin canción previa o sin crossfade: reemplazo directo.
   if (!activa || crossfadeMs <= 0) {
