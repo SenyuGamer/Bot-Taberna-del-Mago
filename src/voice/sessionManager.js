@@ -200,7 +200,7 @@ export async function unir(guild, canal, clientId, usuarioId = null, usuarioNomb
     if (nuevo.status === VoiceConnectionStatus.Destroyed) {
       // La conexión se cayó/cerró: si hay música sonando intentamos reconectar
       // solos (limita con un contador); si no, limpiamos la sesión.
-      if (sesiones.get(guild.id) === sesion) _trasCaida(sesion, "conexión destruida");
+      if (sesiones.get(guild.id) === sesion && !sesion._parando) _trasCaida(sesion, "conexión destruida");
     }
   });
   // Manejo explícito de Disconnected: cuando Discord re-clavifica DAVE o migra
