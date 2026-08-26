@@ -202,6 +202,8 @@ export async function unir(guild, canal, clientId, usuarioId = null, usuarioNomb
     clientId, // para reconectar tras una caída
     reconexiones: 0,
     ultimaCaida: null,
+    _parando: false, // evita re-entrancia en parar()
+    _trasCaidando: false, // evita re-entrancia en _trasCaida()
     controlUserId: null, // DM que controla el menú (quien reprodujo/unió por última vez)
     controlNombre: null,
     connection,
@@ -269,40 +271,52 @@ export async function unir(guild, canal, clientId, usuarioId = null, usuarioNomb
 export function parar(guildId) {
   const s = sesiones.get(guildId);
   if (!s) return false;
-  if (s.crossfadeTimer) { clearInterval(s.crossfadeTimer); s.crossfadeTimer = null; }
-  for (const id of s.fuentes.keys()) _quitarFuenteDeSesion(s, id);
-  clearTimeout(s.temporizadorVacio);
-  s.mixer.detener();
-  try { s.player.stop(); } catch {}
-  try { s.ffEnc.kill("SIGTERM"); } catch {}
-  try { s.connection.destroy(); } catch {}
-  sesiones.delete(guildId);
-  return true;
+  if (s._parando) return false; // evita re-entrancia cuando Destroyed se dispara síncrono
+  s._parando = true;
+  try {
+    if (s.crossfadeTimer) { clearInterval(s.crossfadeTimer); s.crossfadeTimer = null; }
+    for (const id of s.fuentes.keys()) _quitarFuenteDeSesion(s, id);
+    clearTimeout(s.temporizadorVacio);
+    s.mixer.detener();
+    try { s.player.stop(); } catch {}
+    try { s.ffEnc.kill("SIGTERM"); } catch {}
+    try { s.connection.destroy(); } catch {}
+    sesiones.delete(guildId);
+    return true;
+  } finally {
+    s._parando = false;
+  }
 }
 
 // ---------- Reconexión automática tras caídas de la conexión de voz ----------
 
 /**
  * Maneja una caída de la conexión de voz (o un error de cifrado DAVE):
- * si hay fuentes sonando, reconecta la sesión; si no (o se agotaron los
- * intentos), limpia la sesión para que el próximo play cree una nueva.
+ * reconecta la sesión (hasta MAX_RECONEXIONES por ventana); si se agotaron
+ * los intentos o la sesión ya no existe, la limpia para que el próximo play
+ * cree una nueva.
  */
 function _trasCaida(sesion, motivo) {
-  const ahora = Date.now();
-  if (sesion.ultimaCaida && ahora - sesion.ultimaCaida > MS_VENTANA_RECONEXION) {
-    sesion.reconexiones = 0;
-  }
-  sesion.ultimaCaida = ahora;
-  sesion.reconexiones = (sesion.reconexiones ?? 0) + 1;
+  if (sesion._trasCaidando) return; // evita re-entrancia si Destroyed se dispara durante parar()
+  sesion._trasCaidando = true;
+  try {
+    const ahora = Date.now();
+    if (sesion.ultimaCaida && ahora - sesion.ultimaCaida > MS_VENTANA_RECONEXION) {
+      sesion.reconexiones = 0;
+    }
+    sesion.ultimaCaida = ahora;
+    sesion.reconexiones = (sesion.reconexiones ?? 0) + 1;
 
-  const nombre = sesion.guild?.name ?? sesion.guildId;
-  const huboAudio = sesion.fuentes.size > 0;
-  if (huboAudio && sesion.reconexiones <= MAX_RECONEXIONES) {
-    console.log(`🎵 Voz (${nombre}): ${motivo}; reconectando (intento ${sesion.reconexiones}/${MAX_RECONEXIONES}).`);
-    _reconectarSesion(sesion);
-  } else if (sesiones.get(sesion.guildId) === sesion) {
-    console.log(`🎵 Voz (${nombre}): ${motivo}; limpiando sesión.`);
-    parar(sesion.guildId);
+    const nombre = sesion.guild?.name ?? sesion.guildId;
+    if (sesion.reconexiones <= MAX_RECONEXIONES) {
+      console.log(`🎵 Voz (${nombre}): ${motivo}; reconectando (intento ${sesion.reconexiones}/${MAX_RECONEXIONES}).`);
+      _reconectarSesion(sesion);
+    } else if (sesiones.get(sesion.guildId) === sesion) {
+      console.log(`🎵 Voz (${nombre}): ${motivo}; max reconexiones alcanzado, limpiando sesión.`);
+      parar(sesion.guildId);
+    }
+  } finally {
+    sesion._trasCaidando = false;
   }
 }
 
@@ -388,7 +402,7 @@ export function quitarFuente(guildId, id) {
  * Añade una fuente (YouTube u otra URL que entienda yt-dlp).
  * Devuelve { promesa } — `promesa` resuelve al primer audio o rechaza con el error.
  */
-export function agregarFuente(guildId, { id, url, volumen = 1, loop = false, loopDelayMs, tipo = "djgambit", userId = null, nombre = "", cancionId = null, onError }) {
+export function agregarFuente(guildId, { id, url, volumen = 1, loop = false, loopDelayMs, tipo = "djgambit", userId = null, nombre = "", cancionId = null, onError, onFin: onFinUsuario }) {
   const s = sesiones.get(guildId);
   if (!s) return null;
   if (s.fuentes.has(id)) _quitarFuenteDeSesion(s, id);
@@ -419,6 +433,7 @@ export function agregarFuente(guildId, { id, url, volumen = 1, loop = false, loo
     },
     onFin: () => {
       if (!loop) _quitarFuenteDeSesion(s, id);
+      onFinUsuario?.();
     },
     onError: (error) => {
       _quitarFuenteDeSesion(s, id);

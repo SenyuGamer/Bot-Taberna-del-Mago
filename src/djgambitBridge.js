@@ -344,6 +344,42 @@ app.delete("/api/djgambit/menu/:id", (req, res) => {
     res.json({ ok: true, agregadas, omitidas });
   });
 
+  // ---------- Importar archivo .djinni (DJinni Music Player) ----------
+
+  app.post("/api/djgambit/import-djinni", (req, res) => {
+    const guildId = guildDeToken(req);
+    if (!guildId) return res.status(401).json({ ok: false, error: "Panel no vinculado. Usa /musica vincular." });
+    const datos = req.body;
+    if (!datos || typeof datos !== "object") {
+      return res.status(400).json({ ok: false, error: "Formato .djinni inválido." });
+    }
+    const existentes = new Set(listarCancionesMenu().map((c) => c.url));
+    let agregadas = 0;
+    let omitidas = 0;
+    let sinLink = 0;
+    for (const [_folderKey, folder] of Object.entries(datos)) {
+      if (!folder?.streams || !Array.isArray(folder.streams)) continue;
+      const categoria = folder.folderName || "";
+      for (const stream of folder.streams) {
+        const streamName = stream.streamName || "";
+        const streamIcon = stream.streamIcon || "";
+        if (!stream.streamData || !Array.isArray(stream.streamData)) continue;
+        for (const sd of stream.streamData) {
+          const url = normalizarUrl(sd.link);
+          const nombre = sd.name || streamName;
+          if (!nombre || !/^https?:\/\//i.test(url)) { sinLink++; continue; }
+          if (existentes.has(url)) { omitidas++; continue; }
+          agregarCancionMenu({ nombre, icono: streamIcon, url, loop: !!sd.loop, categoria });
+          existentes.add(url);
+          _asegurarPrecarga(url).catch(() => {});
+          agregadas++;
+        }
+      }
+    }
+    console.log(`🎵 .djinni importado: ${agregadas} añadidas, ${omitidas} omitidas, ${sinLink} sin link.`);
+    res.json({ ok: true, agregadas, omitidas, sinLink });
+  });
+
   // ---------- Caché: estado, vaciar y podar ----------
 
   app.get("/api/djgambit/cache", (_req, res) => {
