@@ -208,7 +208,7 @@ export async function unir(guild, canal, clientId, usuarioId = null, usuarioNomb
   // de reconectar. Si es un cierre permanente (4014/kicked, 4021/replaced,
   // 4022/invalidated), no intentamos reconectar. Para el resto, esperamos a
   // que la librería reconecte sola; si no lo hace en 20 s, destruimos y limpiamos.
-  const CODIGOS_NO_RECONECTAR = new Set([4014, 4021, 4022]);
+  const CODIGOS_NO_RECONECTAR = new Set([4021, 4022]);
   connection.on(VoiceConnectionStatus.Disconnected, async (oldState, newState) => {
     const razon = newState.reason;
     const closeCode = newState.closeCode;
@@ -219,6 +219,23 @@ export async function unir(guild, canal, clientId, usuarioId = null, usuarioNomb
       if (sesiones.get(guild.id) === sesion) parar(guild.id);
       return;
     }
+
+    if (closeCode === 4014) {
+      // Diferenciar entre kick manual y reconexión DAVE: si Discord intenta
+      // reconectar, el estado cambiará a Signalling o Connecting en menos de 5s.
+      try {
+        await Promise.race([
+          entersState(connection, VoiceConnectionStatus.Signalling, 5_000),
+          entersState(connection, VoiceConnectionStatus.Connecting, 5_000),
+        ]);
+        console.log(`🎵 Voz (${guild.name}): ignorando 4014 (reconexión en curso).`);
+      } catch {
+        console.log(`🎵 Voz (${guild.name}): desconexión 4014 real (kick/move), limpiando sesión.`);
+        if (sesiones.get(guild.id) === sesion) parar(guild.id);
+        return;
+      }
+    }
+
     // Para el resto de razones (incluyendo DAVE rekeying al entrar/salir
     // usuarios), la librería intenta reconectar sola (transiciona a
     // Signalling → Connecting → Ready). Esperamos a Ready con un timeout.
