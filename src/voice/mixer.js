@@ -48,6 +48,15 @@ export class Mixer {
     this.fuentes.delete(id);
   }
 
+  /** Renombra una fuente (conservando sus buffers y callbacks). Usado por el crossfade. */
+  renombrarFuente(idViejo, idNuevo) {
+    const fuente = this.fuentes.get(idViejo);
+    if (!fuente) return false;
+    this.fuentes.delete(idViejo);
+    this.fuentes.set(idNuevo, fuente);
+    return true;
+  }
+
   setVolumen(id, volumen) {
     const fuente = this.fuentes.get(id);
     if (fuente) fuente.volumen = clampVolumen(volumen);
@@ -108,7 +117,7 @@ export class Mixer {
     let aEmitir = objetivos - this._emitidos;
     if (aEmitir > BURST_MAX) {
       this._t0 = ahora;
-      this._emitidos = objetivos;
+      this._emitidos = 0;
       aEmitir = 1;
     }
     if (aEmitir <= 0) return null;

@@ -98,8 +98,8 @@ export async function renovarTokenGuardado() {
 async function obtenerCredenciales() {
   const guardados = leerTokensGuardados();
   let tokens = {
-    access_token: TWITCH_ACCESS_TOKEN || guardados?.access_token || null,
-    refresh_token: TWITCH_REFRESH_TOKEN || guardados?.refresh_token || null,
+    access_token: guardados?.access_token || TWITCH_ACCESS_TOKEN || null,
+    refresh_token: guardados?.refresh_token || TWITCH_REFRESH_TOKEN || null,
   };
 
   let info = await validarToken(tokens.access_token);
@@ -341,39 +341,43 @@ function programarRenovacion(client, segundosVida) {
 }
 
 async function crearSuscripcionCanjes(sessionId, broadcasterId, accessToken) {
-  const res = await fetch(SUBSCRIPTIONS_URL, {
-    method: "POST",
-    headers: {
-      "Client-Id": TWITCH_CLIENT_ID,
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      type: "channel.channel_points_custom_reward_redemption.add",
-      version: "1",
-      condition: { broadcaster_user_id: broadcasterId },
-      transport: { method: "websocket", session_id: sessionId },
-    }),
-  });
-  if (res.ok) {
-    intentosRenovacion = 0;
-    console.log("🦉 Suscrito a canjes de puntos del canal (EventSub).");
-    return;
-  }
-
-  if (res.status === 401) {
-    // Token muerto (caducó y Twitch lo rechaza): renovar y reconectar una vez
-    console.warn("🦉 Twitch rechazó el token al suscribirse (401). Renovando y reconectando...");
-    if (intentosRenovacion < MAX_INTENTOS_RENOVACION) {
-      intentosRenovacion++;
-      renovarYAReconectar();
-    } else {
-      console.error("❌ Demasiados intentos de renovación fallidos. Usa /sincronizar twitch de nuevo.");
+  try {
+    const res = await fetch(SUBSCRIPTIONS_URL, {
+      method: "POST",
+      headers: {
+        "Client-Id": TWITCH_CLIENT_ID,
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        type: "channel.channel_points_custom_reward_redemption.add",
+        version: "1",
+        condition: { broadcaster_user_id: broadcasterId },
+        transport: { method: "websocket", session_id: sessionId },
+      }),
+    });
+    if (res.ok) {
+      intentosRenovacion = 0;
+      console.log("🦉 Suscrito a canjes de puntos del canal (EventSub).");
+      return;
     }
-    return;
-  }
 
-  console.error(`❌ No se pudo suscribir a los canjes: ${res.status} ${await res.text()}`);
+    if (res.status === 401) {
+      // Token muerto (caducó y Twitch lo rechaza): renovar y reconectar una vez
+      console.warn("🦉 Twitch rechazó el token al suscribirse (401). Renovando y reconectando...");
+      if (intentosRenovacion < MAX_INTENTOS_RENOVACION) {
+        intentosRenovacion++;
+        renovarYAReconectar();
+      } else {
+        console.error("❌ Demasiados intentos de renovación fallidos. Usa /sincronizar twitch de nuevo.");
+      }
+      return;
+    }
+
+    console.error(`❌ No se pudo suscribir a los canjes: ${res.status} ${await res.text()}`);
+  } catch (error) {
+    console.error("🦉 Error al suscribirse a los canjes de Twitch:", error.message);
+  }
 }
 
 /**
@@ -410,8 +414,10 @@ function conectarEventSub(accessToken, broadcasterId, onCanje, url = EVENTSUB_WS
 
     if (metadata.message_type === "session_reconnect") {
       console.log("🦉 Twitch pidió reconexión de EventSub...");
+      const viejoWs = ws;
       conectarEventSub(accessToken, broadcasterId, onCanje, payload.session.reconnect_url);
-      ws.close();
+      viejoWs.onclose = () => {};
+      viejoWs.close();
     }
 
     if (metadata.message_type === "revocation") {
@@ -440,7 +446,7 @@ function conectarEventSub(accessToken, broadcasterId, onCanje, url = EVENTSUB_WS
   ws.onclose = () => {
     clearTimeout(keepaliveTimer);
     // Solo reconecta si es la conexión vigente y no fue un cierre voluntario
-    if (!detenido && url === EVENTSUB_WS_URL && wsActual === ws) {
+    if (!detenido && wsActual === ws) {
       console.log("🦉 EventSub desconectado. Reintentando en 10s...");
       setTimeout(() => {
         if (!detenido && wsActual === ws) conectarEventSub(accessToken, broadcasterId, onCanje);

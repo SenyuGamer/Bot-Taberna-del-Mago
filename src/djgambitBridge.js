@@ -97,9 +97,9 @@ export function registrarRutaTemporal(path, { timeoutMs = 5 * 60_000, manejador 
  * servidor de Discord y a la identidad del DM que lo pide. Lo crea /musica vincular.
  */
 export function generarCodigoVinculacion(guildId, dmId) {
-  // Limpia cÃ³digos caducados de la misma guild
+  // Limpia códigos caducados (de cualquier guild, no solo la actual)
   for (const [codigo, info] of codigos) {
-    if (info.guildId === guildId && info.expira < Date.now()) codigos.delete(codigo);
+    if (info.expira < Date.now()) codigos.delete(codigo);
   }
   let codigo = "";
   do {

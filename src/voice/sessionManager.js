@@ -38,6 +38,72 @@ let onCambioSonando = null;
 export function setOnCambioSonando(fn) { onCambioSonando = fn; }
 
 /**
+ * Crea un handler de cierre del encoder opus reutilizable.
+ * Tanto la creación inicial como _reemplazarEncoder() usan la misma lógica.
+ */
+function _crearHandlerCierreEncoder(sesion, miEncoder) {
+  return (code) => {
+    const guildId = sesion.guildId;
+    if (sesiones.get(guildId) !== sesion) return; // sesión ya cerrada
+    if (sesion.ffEnc !== miEncoder) return; // encoder ya fue reemplazado
+    if (sesion._reemplazandoEncoder) return; // swap en curso, ignorar
+    if (code === 0) return; // cierre limpio (p. ej. al detener)
+    if (sesion.recargasEncoder >= 5) {
+      console.error(`🎵 Encoder opus se cerró ${sesion.recargasEncoder} veces; parando sesión de ${sesion.guild?.name ?? guildId}.`);
+      parar(guildId);
+      return;
+    }
+    _reemplazarEncoder(sesion, `cierre inesperado code=${code}`);
+  };
+}
+
+/**
+ * Reemplaza el encoder opus de la sesión de forma limpia:
+ * 1. Desconecta (unpipe) el mixer del encoder viejo
+ * 2. Mata el proceso viejo
+ * 3. Crea un encoder nuevo y lo conecta al mixer
+ * 4. Crea un AudioResource nuevo y lo reproduce en el player
+ * Evita las carreras con el handler close del encoder viejo.
+ */
+function _reemplazarEncoder(sesion, motivo) {
+  const nombre = sesion.guild?.name ?? sesion.guildId;
+  sesion.recargasEncoder++;
+  console.log(`🎵 Reemplazando encoder (${motivo}, #${sesion.recargasEncoder}) en ${nombre}`);
+
+  const viejoEnc = sesion.ffEnc;
+  // 1. Marcar swap en curso para que el handler close del viejo no interfiera
+  sesion._reemplazandoEncoder = true;
+  // 2. Desconectar el mixer del encoder viejo ANTES de matarlo
+  try { sesion.mixer.salida.unpipe(viejoEnc.stdin); } catch {}
+  // 3. Matar el proceso viejo
+  try { viejoEnc.kill("SIGTERM"); } catch {}
+
+  // 4. Crear encoder nuevo
+  const ffNuevo = crearEncoderOpus({ onError: (e) => console.error(`🎵 ${e.message}`) });
+  sesion.ffEnc = ffNuevo;
+  sesion._reemplazandoEncoder = false;
+
+  // 5. Diagnóstico del nuevo encoder
+  ffNuevo.stdout.on("end", () => console.log(`🎵 Encoder stdout END (${nombre})`));
+  ffNuevo.stdout.on("close", () => console.log(`🎵 Encoder stdout CLOSE (${nombre})`));
+  ffNuevo.on("exit", (code, signal) => console.log(`🎵 Encoder proceso EXIT code=${code} signal=${signal} (${nombre})`));
+
+  // 6. Conectar el mixer al encoder nuevo
+  try { sesion.mixer.salida.pipe(ffNuevo.stdin); } catch {}
+
+  // 7. Registrar handler close del nuevo encoder (auto-reparación)
+  ffNuevo.on("close", _crearHandlerCierreEncoder(sesion, ffNuevo));
+
+  // 8. Crear recurso nuevo y reproducir
+  const recursoNuevo = createAudioResource(ffNuevo.stdout, { inputType: StreamType.OggOpus });
+  sesion.recurso = recursoNuevo;
+  try { sesion.player.play(recursoNuevo); } catch (e) {
+    console.error(`🎵 No pude reiniciar el reproductor tras reemplazo:`, e.message);
+  }
+  console.log(`🎵 Encoder reemplazado OK en ${nombre}`);
+}
+
+/**
  * Averigua la duración (ms) de una URL de forma no bloqueante:
  * ffprobe del archivo en caché si existe, o una consulta ligera de yt-dlp.
  */
@@ -153,31 +219,19 @@ export async function unir(guild, canal, clientId, usuarioId = null, usuarioNomb
       if (sesiones.get(guild.id) === sesion) parar(guild.id);
       return;
     }
-    // Para el resto de razones, la librería intenta reconectar sola
-    // (transiciona a Signalling → Connecting → Ready). Le damos 20 s.
+    // Para el resto de razones (incluyendo DAVE rekeying al entrar/salir
+    // usuarios), la librería intenta reconectar sola (transiciona a
+    // Signalling → Connecting → Ready). Esperamos a Ready con un timeout.
     try {
-      await Promise.race([
-        entersState(connection, VoiceConnectionStatus.Ready, 20_000),
-        entersState(connection, VoiceConnectionStatus.Signalling, 20_000),
-      ]);
+      await entersState(connection, VoiceConnectionStatus.Ready, 20_000);
       console.log(`🎵 Voz (${guild.name}): reconectada tras desconexión transitoria.`);
-      // DAVE rekeying: el socket UDP murió y se recreó. El resource/player
-      // viejos están ligados al socket muerto. Si el player se quedó en idle
-      // (o nunca llegó audio), recreamos encoder+resource para restaurar el
-      // sonido SIN tocar mixer ni pipeline (siguen vivos).
-      if (sesiones.get(guild.id) === sesion) {
-        const PlayerStatus = sesion.player.state?.status;
-        if (PlayerStatus === "idle" || sesion.fuentes.size > 0) {
-          try { sesion.ffEnc.kill("SIGTERM"); } catch {}
-          sesion.recargasEncoder++;
-          const ffNuevo = crearEncoderOpus({ onError: (e) => console.error(`🎵 ${e.message}`) });
-          sesion.ffEnc = ffNuevo;
-          sesion.ffNuevo = ffNuevo;
-          try { sesion.mixer.salida.pipe(ffNuevo.stdin); } catch {}
-          const recursoNuevo = createAudioResource(ffNuevo.stdout, { inputType: StreamType.OggOpus });
-          sesion.recurso = recursoNuevo;
-          try { sesion.player.play(recursoNuevo); } catch {}
-          console.log(`🎵 Voz (${guild.name}): encoder+resource recreados tras reconexión DAVE.`);
+      // DAVE rekeying: el socket UDP puede haberse recreado. El encoder/resource
+      // viejos están ligados al socket muerto. Esperamos 500ms a que el nuevo
+      // socket se estabilice y entonces recreamos el encoder limpiamente.
+      if (sesiones.get(guild.id) === sesion && sesion.fuentes.size > 0) {
+        await new Promise(r => { const t = setTimeout(r, 500); t.unref?.(); });
+        if (sesiones.get(guild.id) === sesion) {
+          _reemplazarEncoder(sesion, "reconexión DAVE");
         }
       }
     } catch {
@@ -204,6 +258,7 @@ export async function unir(guild, canal, clientId, usuarioId = null, usuarioNomb
     ultimaCaida: null,
     _parando: false, // evita re-entrancia en parar()
     _trasCaidando: false, // evita re-entrancia en _trasCaida()
+    _reemplazandoEncoder: false, // evita que el handler close del viejo interfiera durante un swap
     controlUserId: null, // DM que controla el menú (quien reprodujo/unió por última vez)
     controlNombre: null,
     connection,
@@ -232,31 +287,9 @@ export async function unir(guild, canal, clientId, usuarioId = null, usuarioNomb
 
   // Auto-reparación: si el encoder opus muere (p. ej. "Broken pipe"), lo recargamos
   // sin descolgar la conexión para que la música vuelva sola.
-  // Capturamos la referencia al encoder al crear el handler para que, si el encoder
-  // fue reemplazado por la recuperación DAVE, el handler viejo no interfere.
-  const _crearHandlerCierre = (miEncoder) => (code) => {
-    if (sesiones.get(guild.id) !== sesion) return; // sesión ya cerrada (parar)
-    if (sesion.ffEnc !== miEncoder) return; // encoder ya fue reemplazado (recuperación DAVE)
-    if (code === 0) return; // cierre limpio (p. ej. al detener)
-    if (sesion.recargasEncoder >= 5) {
-      console.error(`🎵 Encoder opus se cerró ${sesion.recargasEncoder} veces; parando sesión de ${guild.name}.`);
-      parar(guild.id);
-      return;
-    }
-    sesion.recargasEncoder++;
-    console.log(`🎵 Encoder opus terminó (código ${code}); recargando encoder (${sesion.recargasEncoder}).`);
-    const ff2 = crearEncoderOpus({ onError: (e) => console.error(`🎵 ${e.message}`) });
-    sesion.ffEnc = ff2;
-    try { mixer.salida.pipe(ff2.stdin); } catch {}
-    const recurso2 = createAudioResource(ff2.stdout, { inputType: StreamType.OggOpus });
-    sesion.recurso = recurso2;
-    try {
-      player.play(recurso2);
-    } catch (e) {
-      console.error("🎵 No pude reiniciar el reproductor:", e.message);
-    }
-  };
-  ffEnc.on("close", _crearHandlerCierre(ffEnc));
+  // Usa la función centralizada _crearHandlerCierreEncoder() que hace unpipe/pipe
+  // limpiamente y evita carreras con el handler de reconexión DAVE.
+  ffEnc.on("close", _crearHandlerCierreEncoder(sesion, ffEnc));
 
   try {
     await entersState(connection, VoiceConnectionStatus.Ready, 20_000);
@@ -279,6 +312,8 @@ export function parar(guildId) {
     clearTimeout(s.temporizadorVacio);
     s.mixer.detener();
     try { s.player.stop(); } catch {}
+    try { s.mixer.salida.unpipe(s.ffEnc.stdin); } catch {}
+    s._reemplazandoEncoder = true; // evita que el handler close intente recrear
     try { s.ffEnc.kill("SIGTERM"); } catch {}
     try { s.connection.destroy(); } catch {}
     sesiones.delete(guildId);
@@ -342,6 +377,9 @@ async function _reconectarSesion(sesion) {
   const menuPlaylist = sesion.menuPlaylist ? { ...sesion.menuPlaylist } : null;
   const reconexiones = sesion.reconexiones;
   const ultimaCaida = sesion.ultimaCaida;
+  // Guardar control del DM antes de parar (parar borra la sesión del Map).
+  const controlUserId = sesion.controlUserId;
+  const controlNombre = sesion.controlNombre;
 
   parar(sesion.guildId); // limpia la sesión caída (evita bucles por Destroyed)
 
@@ -349,6 +387,11 @@ async function _reconectarSesion(sesion) {
     const nueva = await unir(guild, canal, clientId, null, "", { sinControl: true });
     nueva.reconexiones = reconexiones;
     nueva.ultimaCaida = ultimaCaida;
+    // Restaurar titularidad del DM que controlaba el menú.
+    if (controlUserId) {
+      nueva.controlUserId = controlUserId;
+      nueva.controlNombre = controlNombre;
+    }
     if (activa) {
       _ponerCancionActiva(nueva, { id: activa.cancionId, url: activa.url, nombre: activa.nombre, loop: activa.loop }, 0);
     }
@@ -415,6 +458,10 @@ export function agregarFuente(guildId, { id, url, volumen = 1, loop = false, loo
   let resolvePrimer, rejectPrimer;
   const promesa = new Promise((res, rej) => { resolvePrimer = res; rejectPrimer = rej; });
 
+  // Referencia mutable al id: permite renombrar la fuente (crossfade
+  // transición → activa) sin perder la conexión con el mixer y los callbacks.
+  const _idRef = { value: id };
+
   let primerChunkLog = false;
   const pipeline = fabricaPipelines.crearPipeline({
     url,
@@ -423,27 +470,27 @@ export function agregarFuente(guildId, { id, url, volumen = 1, loop = false, loo
     onDatos: (bytes) => {
       if (!primerChunkLog) {
         primerChunkLog = true;
-        console.log(`🎵 Primer chunk PCM de ${id}: ${bytes.length} bytes, mixer fuentes=${s.mixer.fuentes.size}, ffEnc alive=${!s.ffEnc.killed}`);
+        console.log(`🎵 Primer chunk PCM de ${_idRef.value}: ${bytes.length} bytes, mixer fuentes=${s.mixer.fuentes.size}, ffEnc alive=${!s.ffEnc.killed}`);
         // Diagnóstico: verificar que el audio fluye 5 s después
         setTimeout(() => {
           console.log(`🎵 Diag 5s: mixer.fuentes=${s.mixer.fuentes.size}, fuentes activas=${[...s.fuentes.keys()]}, ffEnc alive=${!s.ffEnc?.killed}, player=${s.player.state?.status}, underruns=${s.mixer.underruns}, emitidos=${s.mixer._emitidos}`);
         }, 5000).unref?.();
       }
-      return s.mixer.empujar(id, bytes); // false → el pipeline pausa su ffmpeg
+      return s.mixer.empujar(_idRef.value, bytes); // false → el pipeline pausa su ffmpeg
     },
     onFin: () => {
-      if (!loop) _quitarFuenteDeSesion(s, id);
+      if (!loop) _quitarFuenteDeSesion(s, _idRef.value);
       onFinUsuario?.();
     },
     onError: (error) => {
-      _quitarFuenteDeSesion(s, id);
+      _quitarFuenteDeSesion(s, _idRef.value);
       rejectPrimer(error);
       onError?.(error);
     },
   });
   s.mixer.setStockBajo(id, () => pipeline.reanudar());
 
-  s.fuentes.set(id, { id, url, tipo, loop, volumen: clampVolumen(volumen), userId, nombre, cancionId, pipeline });
+  s.fuentes.set(id, { id, url, tipo, loop, volumen: clampVolumen(volumen), userId, nombre, cancionId, pipeline, _idRef });
   pipeline.esperarPrimerAudio?.().then(resolvePrimer).catch(rejectPrimer);
 
   // Mantener cacheManual sincronizado: las fuentes manuales (/musica url) se muestran en el panel.
@@ -550,7 +597,13 @@ function _ponerCancionActiva(s, { id, url, nombre, loop }, crossfadeMs, section 
           if (!s.menuPlaylist) { s.controlUserId = null; s.controlNombre = null; }
         }
       },
-      onError: (e) => console.error(`🎵 Canción del menú falló:`, e.message),
+      onError: (e) => {
+        console.error(`🎵 Canción del menú falló:`, e.message);
+        // Si hay playlist, avanzar a la siguiente canción tras un error (ej. vídeo borrado)
+        if (s.menuPlaylist) {
+          setTimeout(() => _avanzarPlaylistPorFin(s.guildId), 1000).unref?.();
+        }
+      },
     });
     if (creada) _marcarTimeline(s, { id, url, nombre });
     return creada;
@@ -565,7 +618,20 @@ function _ponerCancionActiva(s, { id, url, nombre, loop }, crossfadeMs, section 
     nombre,
     tipo: "menu",
     cancionId: id,
-    onError: (e) => console.error(`🎵 Canción del menú falló:`, e.message),
+    onFin: () => {
+      if (!loop) {
+        if (!s.menuPlaylist) { s.timeline = null; onCambioSonando?.(null); }
+        _avanzarPlaylistPorFin(s.guildId);
+        if (!s.menuPlaylist) { s.controlUserId = null; s.controlNombre = null; }
+      }
+    },
+    onError: (e) => {
+      console.error(`🎵 Canción del menú falló:`, e.message);
+      // Si hay playlist, avanzar a la siguiente canción tras un error (ej. vídeo borrado)
+      if (s.menuPlaylist) {
+        setTimeout(() => _avanzarPlaylistPorFin(s.guildId), 1000).unref?.();
+      }
+    },
   });
   if (!creada) return null;
   _marcarTimeline(s, { id, url, nombre });
@@ -593,12 +659,14 @@ function _ponerCancionActiva(s, { id, url, nombre, loop }, crossfadeMs, section 
       clearInterval(s.crossfadeTimer);
       s.crossfadeTimer = null;
       if (activa) _quitarFuenteDeSesion(s, "menu:activa");
-      // La nueva pasa a ser la activa del menú.
+      // La nueva pasa a ser la activa del menú: renombrar en fuentes, mixer e idRef.
       const fuente = s.fuentes.get("menu:transicion");
       if (fuente) {
         s.fuentes.delete("menu:transicion");
         s.fuentes.set("menu:activa", { ...fuente, id: "menu:activa", volumen: 1 });
-        s.mixer.setVolumen("menu:activa", 1);
+        s.mixer.renombrarFuente("menu:transicion", "menu:activa");
+        // Actualizar la referencia mutable para que onDatos/onFin/onError usen el nuevo id.
+        if (fuente._idRef) fuente._idRef.value = "menu:activa";
       }
     }
   }, Math.max(25, crossfadeMs / PASOS_CROSSFADE));

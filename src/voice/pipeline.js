@@ -73,6 +73,7 @@ export function crearPipeline({ url, loop = false, loopDelayMs, onDatos, onFin, 
 
   const lanzar = () => {
     if (detenido) return;
+    primerChunk = false;
 
     pausado = false;
 
@@ -146,11 +147,13 @@ export function crearPipeline({ url, loop = false, loopDelayMs, onDatos, onFin, 
     yt?.on("close", (code) => {
       // Descarga terminada: si terminó bien, convertimos la copia parcial en caché definitiva.
       if (escritorCache) {
-        escritorCache.end();
+        const _ec = escritorCache;
         escritorCache = null;
-        if (code === 0 && archivoCache && !detenido) {
-          try { renameSync(`${archivoCache}.part`, archivoCache); console.log(`🎵 Caché: guardada <${url}> en disco.`); } catch {}
-        }
+        _ec.end(() => {
+          if (code === 0 && archivoCache && !detenido) {
+            try { renameSync(`${archivoCache}.part`, archivoCache); console.log(`🎵 Caché: guardada <${url}> en disco.`); } catch {}
+          }
+        });
       }
       try { ff.stdin.end(); } catch {}
       if (detenido) return;
@@ -180,11 +183,11 @@ export function crearPipeline({ url, loop = false, loopDelayMs, onDatos, onFin, 
       ytActual = null;
       ffActual = null;
       if (detenido) return;
-      if (loop) {
+      if (reintentando) {
+        // Hay un reintento en curso (pre- o mid-stream); esperamos su desenlace.
+      } else if (loop) {
         const espera = typeof loopDelayMs === "function" ? loopDelayMs() : (loopDelayMs ?? 750);
         setTimeout(() => { if (!detenido) lanzar(); }, espera).unref?.();
-      } else if (reintentando) {
-        // Hay un reintento en curso (pre- o mid-stream); esperamos su desenlace.
       } else if (!primerChunk) {
         finalizarError(new Error("La tubería de audio terminó sin emitir audio."));
       } else {
@@ -327,6 +330,11 @@ export function precargarCache({ url, cacheDir = CACHE_DIR, rutas = {} }) {
     }
 
     const escritor = createWriteStream(`${archivo}.part`);
+    escritor.on("error", (error) => {
+      try { escritor.destroy(); } catch {}
+      try { rmSync(`${archivo}.part`, { force: true }); } catch {}
+      reject(error);
+    });
     yt.stdout.pipe(escritor);
     let errores = "";
     yt.stderr.on("data", (d) => { if (errores.length < 2000) errores += d.toString(); });
