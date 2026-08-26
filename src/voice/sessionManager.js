@@ -357,11 +357,16 @@ function _trasCaida(sesion, motivo) {
       sesion.reconexiones = 0;
     }
     sesion.ultimaCaida = ahora;
-    sesion.reconexiones = (sesion.reconexiones ?? 0) + 1;
+    
+    const ignorarLimite = motivo.includes("DAVE");
+    if (!ignorarLimite) {
+      sesion.reconexiones = (sesion.reconexiones ?? 0) + 1;
+    }
+    const intentoLog = ignorarLimite ? "DAVE-ignorado" : `${sesion.reconexiones}/${MAX_RECONEXIONES}`;
 
     const nombre = sesion.guild?.name ?? sesion.guildId;
-    if (sesion.reconexiones <= MAX_RECONEXIONES) {
-      console.log(`🎵 Voz (${nombre}): ${motivo}; reconectando (intento ${sesion.reconexiones}/${MAX_RECONEXIONES}).`);
+    if (ignorarLimite || sesion.reconexiones <= MAX_RECONEXIONES) {
+      console.log(`🎵 Voz (${nombre}): ${motivo}; reconectando (intento ${intentoLog}).`);
       _reconectarSesion(sesion);
     } else if (sesiones.get(sesion.guildId) === sesion) {
       console.log(`🎵 Voz (${nombre}): ${motivo}; max reconexiones alcanzado, limpiando sesión.`);
