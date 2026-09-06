@@ -6,10 +6,12 @@ import { registros } from "./commands/registros.js";
 import { sincronizar } from "./commands/sincronizar.js";
 import { hora } from "./commands/hora.js";
 import { musica } from "./commands/musica.js";
+import { bienvenida } from "./commands/bienvenida.js";
 import { embedError } from "./utils.js";
 import { iniciarTwitch } from "./twitch.js";
 import { iniciarPuenteDjgambit } from "./djgambitBridge.js";
 import { programarSalidaSiVacio, reconectarTodasSesiones } from "./voice/sessionManager.js";
+import { handleMemberJoin, handleMemberLeave } from "./welcomeHandler.js";
 
 // Blindaje: un error del cifrado de voz (DAVE, build WASM de davey en RISC-V)
 // no debe tumbar todo el proceso. Se loguea, se reconectan las sesiones de voz
@@ -36,10 +38,10 @@ if (!token || token === "pega_aqui_tu_token") {
 }
 
 export const comandos = new Map(
-  [estrellitas, estrellitasNegras, inspiracion, dm, registros, sincronizar, hora, musica].map((c) => [c.data.name, c])
+  [estrellitas, estrellitasNegras, inspiracion, dm, registros, sincronizar, hora, musica, bienvenida].map((c) => [c.data.name, c])
 );
 
-const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates] });
+const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates, GatewayIntentBits.GuildMembers] });
 
 client.once("clientReady", () => {
   console.log(`🍺 La Taberna del Mago abre sus puertas: ${client.user.tag} en línea.`);
@@ -47,6 +49,10 @@ client.once("clientReady", () => {
   iniciarTwitch(client);
   iniciarPuenteDjgambit(client);
 });
+
+// Bienvenida / despedida de miembros
+client.on("guildMemberAdd", (member) => handleMemberJoin(member));
+client.on("guildMemberRemove", (member) => handleMemberLeave(member));
 
 // Si el canal de voz se queda sin humanos, el bot se retira solo a los 5 min.
 client.on("voiceStateUpdate", (oldState, newState) => {

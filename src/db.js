@@ -93,8 +93,16 @@ export function addInspirations(guildId, userId, delta) {
 
 // ---------- Configuración del servidor ----------
 
+// Migraciones: columnas para el sistema de bienvenida/despedida.
+try { db.exec("ALTER TABLE guild_config ADD COLUMN welcome_channel_id TEXT"); } catch {}
+try { db.exec("ALTER TABLE guild_config ADD COLUMN goodbye_channel_id TEXT"); } catch {}
+try { db.exec("ALTER TABLE guild_config ADD COLUMN welcome_enabled INTEGER NOT NULL DEFAULT 0"); } catch {}
+try { db.exec("ALTER TABLE guild_config ADD COLUMN goodbye_enabled INTEGER NOT NULL DEFAULT 0"); } catch {}
+try { db.exec("ALTER TABLE guild_config ADD COLUMN welcome_embed_json TEXT"); } catch {}
+try { db.exec("ALTER TABLE guild_config ADD COLUMN goodbye_embed_json TEXT"); } catch {}
+
 const getConfigStmt = db.prepare(
-  "SELECT dm_id, log_channel_id FROM guild_config WHERE guild_id = ?"
+  "SELECT dm_id, log_channel_id, welcome_channel_id, goodbye_channel_id, welcome_enabled, goodbye_enabled, welcome_embed_json, goodbye_embed_json FROM guild_config WHERE guild_id = ?"
 );
 const ensureConfigStmt = db.prepare(
   "INSERT OR IGNORE INTO guild_config (guild_id) VALUES (?)"
@@ -104,6 +112,24 @@ const setDmStmt = db.prepare(
 );
 const setLogChannelStmt = db.prepare(
   "UPDATE guild_config SET log_channel_id = ? WHERE guild_id = ?"
+);
+const setWelcomeChannelStmt = db.prepare(
+  "UPDATE guild_config SET welcome_channel_id = ? WHERE guild_id = ?"
+);
+const setGoodbyeChannelStmt = db.prepare(
+  "UPDATE guild_config SET goodbye_channel_id = ? WHERE guild_id = ?"
+);
+const setWelcomeEnabledStmt = db.prepare(
+  "UPDATE guild_config SET welcome_enabled = ? WHERE guild_id = ?"
+);
+const setGoodbyeEnabledStmt = db.prepare(
+  "UPDATE guild_config SET goodbye_enabled = ? WHERE guild_id = ?"
+);
+const setWelcomeEmbedStmt = db.prepare(
+  "UPDATE guild_config SET welcome_embed_json = ? WHERE guild_id = ?"
+);
+const setGoodbyeEmbedStmt = db.prepare(
+  "UPDATE guild_config SET goodbye_embed_json = ? WHERE guild_id = ?"
 );
 
 export function getConfig(guildId) {
@@ -119,6 +145,36 @@ export function setDm(guildId, dmId) {
 export function setLogChannel(guildId, channelId) {
   ensureConfigStmt.run(guildId);
   setLogChannelStmt.run(channelId, guildId);
+}
+
+export function setWelcomeChannel(guildId, channelId) {
+  ensureConfigStmt.run(guildId);
+  setWelcomeChannelStmt.run(channelId, guildId);
+}
+
+export function setGoodbyeChannel(guildId, channelId) {
+  ensureConfigStmt.run(guildId);
+  setGoodbyeChannelStmt.run(channelId, guildId);
+}
+
+export function setWelcomeEnabled(guildId, enabled) {
+  ensureConfigStmt.run(guildId);
+  setWelcomeEnabledStmt.run(enabled ? 1 : 0, guildId);
+}
+
+export function setGoodbyeEnabled(guildId, enabled) {
+  ensureConfigStmt.run(guildId);
+  setGoodbyeEnabledStmt.run(enabled ? 1 : 0, guildId);
+}
+
+export function setWelcomeEmbed(guildId, json) {
+  ensureConfigStmt.run(guildId);
+  setWelcomeEmbedStmt.run(json, guildId);
+}
+
+export function setGoodbyeEmbed(guildId, json) {
+  ensureConfigStmt.run(guildId);
+  setGoodbyeEmbedStmt.run(json, guildId);
 }
 
 // ---------- Sesiones de música (DJGambit → voz) ----------
